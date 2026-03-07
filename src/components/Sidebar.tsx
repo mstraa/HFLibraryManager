@@ -5,7 +5,7 @@ import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
 
 const ASSET_TYPES: { value: AssetType; label: string }[] = [
-  { value: "affinity", label: "Affinity" },
+  { value: "design", label: "Design / Images" },
   { value: "hueforge", label: "HueForge" },
   { value: "bambulab", label: "BambuLab" },
 ];

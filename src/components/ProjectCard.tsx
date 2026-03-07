@@ -2,7 +2,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ProjectSummary } from "../lib/types";
 
 const ASSET_TYPE_LABELS: Record<string, string> = {
-  affinity: "Affinity",
+  design: "Design",
   hueforge: "HueForge",
   bambulab: "BambuLab",
 };

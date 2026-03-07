@@ -9,10 +9,10 @@ import {
 import type { Asset, AssetType } from "../lib/types";
 
 const ASSET_CONFIG: Record<AssetType, { label: string; color: string; extensions: string[] }> = {
-  affinity: {
-    label: "Affinity Designer",
+  design: {
+    label: "Design / Images",
     color: "#4a90d9",
-    extensions: ["afdesign", "afphoto", "afpub"],
+    extensions: ["afdesign", "afphoto", "afpub", "psd", "ai", "svg", "png", "jpg", "jpeg", "tiff", "webp", "gif", "bmp", "xcf", "kra"],
   },
   hueforge: {
     label: "HueForge",

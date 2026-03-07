@@ -81,7 +81,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS assets (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
-                asset_type TEXT NOT NULL CHECK(asset_type IN ('affinity', 'hueforge', 'bambulab')),
+                asset_type TEXT NOT NULL CHECK(asset_type IN ('design', 'hueforge', 'bambulab')),
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
@@ -120,6 +120,46 @@ impl Database {
             END;
             ",
         )?;
+
+        // Migration: rename 'affinity' asset_type to 'design'
+        let has_affinity: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE asset_type = 'affinity')",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if has_affinity {
+            conn.execute_batch(
+                "
+                CREATE TABLE assets_new (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    asset_type TEXT NOT NULL CHECK(asset_type IN ('design', 'hueforge', 'bambulab')),
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
+                INSERT INTO assets_new SELECT id, project_id,
+                    CASE WHEN asset_type = 'affinity' THEN 'design' ELSE asset_type END,
+                    created_at FROM assets;
+                DROP TABLE assets;
+                ALTER TABLE assets_new RENAME TO assets;
+                "
+            )?;
+        }
+
+        // Migration: rename affinity directories to design
+        let projects_dir = Self::data_dir().join("projects");
+        if projects_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&projects_dir) {
+                for entry in entries.flatten() {
+                    let old_path = entry.path().join("affinity");
+                    let new_path = entry.path().join("design");
+                    if old_path.exists() && !new_path.exists() {
+                        let _ = fs::rename(&old_path, &new_path);
+                    }
+                }
+            }
+        }
 
         Ok(())
     }

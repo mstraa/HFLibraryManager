@@ -19,7 +19,7 @@ import AssetSection from "./AssetSection";
 import ConfirmDialog from "./ConfirmDialog";
 import { onDragMouseDown } from "../hooks/useDrag";
 
-const ASSET_TYPES: AssetType[] = ["affinity", "hueforge", "bambulab"];
+const ASSET_TYPES: AssetType[] = ["design", "hueforge", "bambulab"];
 
 interface ProjectDetailProps {
   projectId: string;

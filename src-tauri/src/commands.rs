@@ -29,7 +29,7 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
 
     // Create project directory
     let project_dir = Database::data_dir().join("projects").join(&id);
-    for sub in &["affinity", "hueforge", "bambulab", "thumbnails"] {
+    for sub in &["design", "hueforge", "bambulab", "thumbnails"] {
         fs::create_dir_all(project_dir.join(sub)).map_err(map_err)?;
     }
 
@@ -422,7 +422,7 @@ pub fn import_file(
     let conn = db.conn.lock().map_err(map_err)?;
 
     // Validate asset type
-    if !["affinity", "hueforge", "bambulab"].contains(&asset_type.as_str()) {
+    if !["design", "hueforge", "bambulab"].contains(&asset_type.as_str()) {
         return Err(format!("Invalid asset type: {}", asset_type));
     }
 

@@ -47,7 +47,7 @@ export interface CollectionSummary {
 export interface Asset {
   id: string;
   project_id: string;
-  asset_type: "affinity" | "hueforge" | "bambulab";
+  asset_type: "design" | "hueforge" | "bambulab";
   created_at: string;
   revisions: Revision[];
 }
@@ -63,7 +63,7 @@ export interface Revision {
   created_at: string;
 }
 
-export type AssetType = "affinity" | "hueforge" | "bambulab";
+export type AssetType = "design" | "hueforge" | "bambulab";
 export type SortBy = "name" | "created_at" | "updated_at";
 export type SortOrder = "asc" | "desc";
 
