@@ -102,3 +102,11 @@ export async function importFile(
 export async function deleteRevision(revisionId: string): Promise<void> {
   return invoke("delete_revision", { revisionId });
 }
+
+export async function openFileInDefaultApp(path: string): Promise<void> {
+  return invoke("open_file_in_default_app", { path });
+}
+
+export async function updateRevisionNotes(revisionId: string, notes: string): Promise<void> {
+  return invoke("update_revision_notes", { revisionId, notes });
+}

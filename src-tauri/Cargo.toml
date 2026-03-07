@@ -24,4 +24,5 @@ chrono = { version = "0.4", features = ["serde"] }
 image = "0.25"
 zip = "2"
 dirs = "6"
+open = "5"
 

@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
 import ProjectGrid from "./components/ProjectGrid";
 import CreateProjectDialog from "./components/CreateProjectDialog";
+import ProjectDetail from "./components/ProjectDetail";
 import "./App.css";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
   const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -41,16 +43,28 @@ function App() {
   }, [loadProjects, search]);
 
   async function handleCreate(name: string, description: string) {
-    await createProject(name, description || undefined);
+    const project = await createProject(name, description || undefined);
     setShowCreate(false);
-    await loadProjects();
+    setActiveProjectId(project.id);
   }
 
-  function handleProjectClick(id: string) {
-    // Phase 3 will add navigation to project detail
-    console.log("Open project:", id);
+  function handleBack() {
+    setActiveProjectId(null);
+    loadProjects();
   }
 
+  // Project detail view
+  if (activeProjectId) {
+    return (
+      <ProjectDetail
+        projectId={activeProjectId}
+        onBack={handleBack}
+        onDeleted={handleBack}
+      />
+    );
+  }
+
+  // Library view
   return (
     <div className="h-screen flex bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <Sidebar
@@ -76,7 +90,7 @@ function App() {
 
         <ProjectGrid
           projects={projects}
-          onProjectClick={handleProjectClick}
+          onProjectClick={setActiveProjectId}
         />
       </div>
 

@@ -538,6 +538,23 @@ pub fn delete_revision(db: State<Database>, revision_id: String) -> CmdResult<()
     Ok(())
 }
 
+// ── File Operations ──
+
+#[tauri::command]
+pub fn open_file_in_default_app(path: String) -> CmdResult<()> {
+    open::that(&path).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn update_revision_notes(db: State<Database>, revision_id: String, notes: String) -> CmdResult<()> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    conn.execute(
+        "UPDATE revisions SET notes = ?1 WHERE id = ?2",
+        rusqlite::params![notes, revision_id],
+    ).map_err(map_err)?;
+    Ok(())
+}
+
 // ── Helpers ──
 
 fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {

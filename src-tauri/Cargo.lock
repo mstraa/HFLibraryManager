@@ -3181,6 +3181,7 @@ dependencies = [
  "chrono",
  "dirs",
  "image",
+ "open",
  "rusqlite",
  "serde",
  "serde_json",
