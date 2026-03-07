@@ -4,6 +4,7 @@ import {
   importFile,
   openFileInDefaultApp,
   deleteRevision,
+  setRevisionThumbnail,
 } from "../lib/api";
 import type { Asset, AssetType } from "../lib/types";
 
@@ -58,6 +59,18 @@ export default function AssetSection({ assetType, asset, projectId, onRefresh }:
     onRefresh();
   }
 
+  async function handleSetRevisionThumbnail(revisionId: string) {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+    });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
+    if (!path) return;
+    await setRevisionThumbnail(revisionId, path);
+    onRefresh();
+  }
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString(undefined, {
       year: "numeric",
@@ -102,7 +115,13 @@ export default function AssetSection({ assetType, asset, projectId, onRefresh }:
           {revisions.map((rev) => (
             <div key={rev.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
               {/* Thumbnail */}
-              <div className="w-10 h-10 rounded bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 overflow-hidden">
+              <div
+                onClick={() => !rev.thumbnail_path && handleSetRevisionThumbnail(rev.id)}
+                className={`w-10 h-10 rounded bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 overflow-hidden ${
+                  !rev.thumbnail_path ? "cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600" : ""
+                }`}
+                title={rev.thumbnail_path ? undefined : "Click to set thumbnail"}
+              >
                 {rev.thumbnail_path ? (
                   <img
                     src={convertFileSrc(rev.thumbnail_path)}
@@ -136,6 +155,15 @@ export default function AssetSection({ assetType, asset, projectId, onRefresh }:
 
               {/* Actions */}
               <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handleSetRevisionThumbnail(rev.id)}
+                  className="p-1.5 text-gray-400 hover:text-amber-500 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                  title="Set thumbnail"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </button>
                 <button
                   onClick={() => handleOpenFile(rev.file_path)}
                   className="p-1.5 text-gray-400 hover:text-indigo-500 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"

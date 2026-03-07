@@ -110,3 +110,7 @@ export async function openFileInDefaultApp(path: string): Promise<void> {
 export async function updateRevisionNotes(revisionId: string, notes: string): Promise<void> {
   return invoke("update_revision_notes", { revisionId, notes });
 }
+
+export async function setRevisionThumbnail(revisionId: string, sourcePath: string): Promise<string> {
+  return invoke("set_revision_thumbnail", { revisionId, sourcePath });
+}

@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod models;
+mod thumbnails;
 
 use db::Database;
 
@@ -39,6 +40,7 @@ pub fn run() {
             commands::delete_revision,
             commands::open_file_in_default_app,
             commands::update_revision_notes,
+            commands::set_revision_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

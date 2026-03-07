@@ -1,6 +1,8 @@
 use crate::db::Database;
 use crate::models::*;
+use crate::thumbnails;
 use std::fs;
+use std::path::Path;
 use tauri::State;
 use uuid::Uuid;
 use chrono::Utc;
@@ -469,15 +471,50 @@ pub fn import_file(
 
     let notes_str = notes.unwrap_or_default();
 
+    // Auto-extract thumbnail for 3mf files
+    let thumb_path = if asset_type == "bambulab" {
+        let thumb_dir = Database::data_dir()
+            .join("projects")
+            .join(&project_id)
+            .join("thumbnails");
+        thumbnails::extract_3mf_thumbnail(Path::new(&dest_path))
+            .and_then(|bytes| {
+                thumbnails::generate_thumbnail(
+                    &bytes,
+                    &thumb_dir,
+                    &format!("rev_{}.png", rev_id),
+                )
+            })
+            .map(|p| p.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
     conn.execute(
-        "INSERT INTO revisions (id, asset_id, version_number, file_path, original_filename, notes, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![rev_id, asset_id, next_version, dest_path_str, original_filename, notes_str, now],
+        "INSERT INTO revisions (id, asset_id, version_number, file_path, original_filename, notes, thumbnail_path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![rev_id, asset_id, next_version, dest_path_str, original_filename, notes_str, thumb_path, now],
     ).map_err(map_err)?;
 
     // Update project timestamp
     conn.execute("UPDATE projects SET updated_at = ?1 WHERE id = ?2",
         rusqlite::params![now, project_id]).map_err(map_err)?;
+
+    // If this is the first file and project has no thumbnail, auto-set it
+    if thumb_path.is_some() {
+        let has_thumb: bool = conn.query_row(
+            "SELECT thumbnail_path IS NOT NULL FROM projects WHERE id = ?1",
+            rusqlite::params![project_id],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_thumb {
+            conn.execute(
+                "UPDATE projects SET thumbnail_path = ?1 WHERE id = ?2",
+                rusqlite::params![thumb_path, project_id],
+            ).map_err(map_err)?;
+        }
+    }
 
     Ok(Revision {
         id: rev_id,
@@ -486,7 +523,7 @@ pub fn import_file(
         file_path: dest_path_str,
         original_filename,
         notes: notes_str,
-        thumbnail_path: None,
+        thumbnail_path: thumb_path,
         created_at: now,
     })
 }
@@ -496,19 +533,46 @@ pub fn set_project_thumbnail(db: State<Database>, project_id: String, source_pat
     let conn = db.conn.lock().map_err(map_err)?;
 
     let dest_dir = Database::data_dir().join("projects").join(&project_id).join("thumbnails");
-    fs::create_dir_all(&dest_dir).map_err(map_err)?;
 
-    let source = std::path::Path::new(&source_path);
-    let ext = source.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "png".to_string());
-    let dest_path = dest_dir.join(format!("cover.{}", ext));
-
-    fs::copy(&source_path, &dest_path).map_err(map_err)?;
+    let dest_path = thumbnails::generate_thumbnail_from_file(
+        Path::new(&source_path),
+        &dest_dir,
+        "cover.png",
+    ).ok_or_else(|| "Failed to generate thumbnail from image".to_string())?;
 
     let dest_str = dest_path.to_string_lossy().to_string();
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE projects SET thumbnail_path = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![dest_str, now, project_id],
+    ).map_err(map_err)?;
+
+    Ok(dest_str)
+}
+
+#[tauri::command]
+pub fn set_revision_thumbnail(db: State<Database>, revision_id: String, source_path: String) -> CmdResult<String> {
+    let conn = db.conn.lock().map_err(map_err)?;
+
+    // Get project_id for the revision
+    let project_id: String = conn.query_row(
+        "SELECT a.project_id FROM revisions r JOIN assets a ON r.asset_id = a.id WHERE r.id = ?1",
+        rusqlite::params![revision_id],
+        |row| row.get(0),
+    ).map_err(map_err)?;
+
+    let dest_dir = Database::data_dir().join("projects").join(&project_id).join("thumbnails");
+
+    let dest_path = thumbnails::generate_thumbnail_from_file(
+        Path::new(&source_path),
+        &dest_dir,
+        &format!("rev_{}.png", revision_id),
+    ).ok_or_else(|| "Failed to generate thumbnail from image".to_string())?;
+
+    let dest_str = dest_path.to_string_lossy().to_string();
+    conn.execute(
+        "UPDATE revisions SET thumbnail_path = ?1 WHERE id = ?2",
+        rusqlite::params![dest_str, revision_id],
     ).map_err(map_err)?;
 
     Ok(dest_str)
