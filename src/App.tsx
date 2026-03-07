@@ -18,6 +18,7 @@ function App() {
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,6 +51,7 @@ function App() {
 
   function handleBack() {
     setActiveProjectId(null);
+    setSidebarRefreshKey((k) => k + 1);
     loadProjects();
   }
 
@@ -75,6 +77,7 @@ function App() {
         selectedAssetTypes={selectedAssetTypes}
         onAssetTypesChange={setSelectedAssetTypes}
         onCreateProject={() => setShowCreate(true)}
+        refreshKey={sidebarRefreshKey}
       />
 
       <div className="flex-1 flex flex-col min-w-0">

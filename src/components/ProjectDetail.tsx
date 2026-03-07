@@ -9,8 +9,11 @@ import {
   getProjectAssets,
   setProjectTags,
   listTags,
+  listCollections,
+  addProjectToCollection,
+  removeProjectFromCollection,
 } from "../lib/api";
-import type { Project, Asset, AssetType, TagWithCount } from "../lib/types";
+import type { Project, Asset, AssetType, TagWithCount, Collection } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
 import AssetSection from "./AssetSection";
 
@@ -26,19 +29,22 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   const [project, setProject] = useState<Project | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allTags, setAllTags] = useState<TagWithCount[]>([]);
+  const [allCollections, setAllCollections] = useState<Collection[]>([]);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const loadProject = useCallback(async () => {
-    const [p, a, t] = await Promise.all([
+    const [p, a, t, c] = await Promise.all([
       getProject(projectId),
       getProjectAssets(projectId),
       listTags(),
+      listCollections(),
     ]);
     setProject(p);
     setAssets(a);
     setAllTags(t);
+    setAllCollections(c);
     setNameInput(p.name);
   }, [projectId]);
 
@@ -94,6 +100,17 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
       ? current.filter((id) => id !== tagId)
       : [...current, tagId];
     await setProjectTags(projectId, next);
+    loadProject();
+  }
+
+  async function handleToggleCollection(collectionId: string) {
+    if (!project) return;
+    const isInCollection = project.collections.some((c) => c.id === collectionId);
+    if (isInCollection) {
+      await removeProjectFromCollection(projectId, collectionId);
+    } else {
+      await addProjectToCollection(projectId, collectionId);
+    }
     loadProject();
   }
 
@@ -221,23 +238,35 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
               </div>
 
               {/* Collections */}
-              {project.collections.length > 0 && (
-                <div className="mt-3">
-                  <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
-                    Collections
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {project.collections.map((c) => (
-                      <span
+              <div className="mt-3">
+                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+                  Collections
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {allCollections.map((c) => {
+                    const isIn = project.collections.some((pc) => pc.id === c.id);
+                    return (
+                      <button
                         key={c.id}
-                        className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                        onClick={() => handleToggleCollection(c.id)}
+                        className={`text-xs px-2.5 py-1 rounded-lg transition-all cursor-pointer border ${
+                          isIn
+                            ? "bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300 font-medium"
+                            : "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 opacity-60 hover:opacity-100"
+                        }`}
                       >
+                        {isIn && <span className="mr-1">&#10003;</span>}
                         {c.name}
-                      </span>
-                    ))}
-                  </div>
+                      </button>
+                    );
+                  })}
+                  {allCollections.length === 0 && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      No collections created yet
+                    </span>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
 
