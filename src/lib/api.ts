@@ -114,3 +114,13 @@ export async function updateRevisionNotes(revisionId: string, notes: string): Pr
 export async function setRevisionThumbnail(revisionId: string, sourcePath: string): Promise<string> {
   return invoke("set_revision_thumbnail", { revisionId, sourcePath });
 }
+
+// ── Data Management ──
+
+export async function exportData(): Promise<string> {
+  return invoke("export_data");
+}
+
+export async function getDataDir(): Promise<string> {
+  return invoke("get_data_dir");
+}

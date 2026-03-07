@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { listProjects, createProject } from "./lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listProjects, createProject, exportData } from "./lib/api";
 import type { ProjectSummary, SortBy, SortOrder } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
 import ProjectGrid from "./components/ProjectGrid";
 import CreateProjectDialog from "./components/CreateProjectDialog";
 import ProjectDetail from "./components/ProjectDetail";
+import BulkActions from "./components/BulkActions";
+import { useKeyboard } from "./hooks/useKeyboard";
 import "./App.css";
 
 function App() {
@@ -19,8 +21,10 @@ function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const loadProjects = useCallback(async () => {
     const result = await listProjects({
@@ -54,6 +58,44 @@ function App() {
     setSidebarRefreshKey((k) => k + 1);
     loadProjects();
   }
+
+  function handleToggleSelect(id: string) {
+    setSelectedProjectIds((prev) =>
+      prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
+    );
+  }
+
+  async function handleExport() {
+    const data = await exportData();
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `3d-print-manager-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Keyboard shortcuts
+  const keyBindings = useMemo(() => [
+    { key: "n", meta: true, handler: () => setShowCreate(true) },
+    { key: "f", meta: true, handler: () => searchInputRef.current?.focus() },
+    { key: "e", meta: true, shift: true, handler: handleExport },
+    { key: "Escape", handler: () => {
+      if (selectedProjectIds.length > 0) {
+        setSelectedProjectIds([]);
+      } else if (showCreate) {
+        setShowCreate(false);
+      }
+    }},
+    { key: "a", meta: true, handler: () => {
+      if (projects.length > 0) {
+        setSelectedProjectIds(projects.map((p) => p.id));
+      }
+    }},
+  ], [projects, selectedProjectIds.length, showCreate]);
+
+  useKeyboard(keyBindings);
 
   // Project detail view
   if (activeProjectId) {
@@ -89,11 +131,24 @@ function App() {
           sortOrder={sortOrder}
           onSortOrderChange={setSortOrder}
           projectCount={projects.length}
+          inputRef={searchInputRef}
+          onExport={handleExport}
+        />
+
+        <BulkActions
+          selectedIds={selectedProjectIds}
+          onClear={() => setSelectedProjectIds([])}
+          onRefresh={() => {
+            loadProjects();
+            setSidebarRefreshKey((k) => k + 1);
+          }}
         />
 
         <ProjectGrid
           projects={projects}
           onProjectClick={setActiveProjectId}
+          selectedIds={selectedProjectIds}
+          onToggleSelect={handleToggleSelect}
         />
       </div>
 

@@ -10,13 +10,51 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
 interface ProjectCardProps {
   project: ProjectSummary;
   onClick: (id: string) => void;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
-export default function ProjectCard({ project, onClick }: ProjectCardProps) {
+function formatRelativeDate(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+  if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
+  return `${Math.floor(diffDays / 365)}y ago`;
+}
+
+export default function ProjectCard({
+  project,
+  onClick,
+  selected = false,
+  selectionMode = false,
+  onToggleSelect,
+}: ProjectCardProps) {
+  function handleClick(e: React.MouseEvent) {
+    if (selectionMode && onToggleSelect) {
+      onToggleSelect(project.id);
+    } else if (e.metaKey || e.ctrlKey) {
+      // Cmd/Ctrl+click enters selection mode
+      onToggleSelect?.(project.id);
+    } else {
+      onClick(project.id);
+    }
+  }
+
   return (
     <div
-      onClick={() => onClick(project.id)}
-      className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden cursor-pointer hover:shadow-lg hover:border-indigo-300 dark:hover:border-indigo-600 transition-all duration-200"
+      onClick={handleClick}
+      className={`group bg-white dark:bg-gray-800 border rounded-xl overflow-hidden cursor-pointer hover:shadow-lg transition-all duration-200 ${
+        selected
+          ? "border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-300 dark:ring-indigo-600"
+          : "border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600"
+      }`}
     >
       {/* Thumbnail */}
       <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-750 relative overflow-hidden">
@@ -38,13 +76,37 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
             </svg>
           </div>
         )}
+
+        {/* Selection checkbox overlay */}
+        {(selectionMode || selected) && (
+          <div className="absolute top-2 left-2">
+            <div
+              className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                selected
+                  ? "bg-indigo-500 border-indigo-500"
+                  : "bg-white/80 border-gray-400"
+              }`}
+            >
+              {selected && (
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Info */}
       <div className="p-3">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-          {project.name}
-        </h3>
+        <div className="flex items-center justify-between gap-1">
+          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            {project.name}
+          </h3>
+          <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">
+            {formatRelativeDate(project.updated_at)}
+          </span>
+        </div>
 
         <div className="flex flex-wrap gap-1 mt-2">
           {project.tags.map((tag) => (

@@ -41,6 +41,8 @@ pub fn run() {
             commands::open_file_in_default_app,
             commands::update_revision_notes,
             commands::set_revision_thumbnail,
+            commands::export_data,
+            commands::get_data_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

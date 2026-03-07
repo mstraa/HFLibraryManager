@@ -16,6 +16,7 @@ import {
 import type { Project, Asset, AssetType, TagWithCount, Collection } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
 import AssetSection from "./AssetSection";
+import ConfirmDialog from "./ConfirmDialog";
 
 const ASSET_TYPES: AssetType[] = ["affinity", "hueforge", "bambulab"];
 
@@ -33,6 +34,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const loadProject = useCallback(async () => {
     const [p, a, t, c] = await Promise.all([
@@ -116,6 +118,10 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
 
   async function handleDelete() {
     if (!project) return;
+    setShowDeleteConfirm(true);
+  }
+
+  async function confirmDelete() {
     await deleteProject(projectId);
     onDeleted();
   }
@@ -301,6 +307,16 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Project"
+        message={`Delete "${project.name}"? This will remove all associated files and cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }

@@ -619,6 +619,82 @@ pub fn update_revision_notes(db: State<Database>, revision_id: String, notes: St
     Ok(())
 }
 
+// ── Data Export ──
+
+#[tauri::command]
+pub fn export_data(db: State<Database>) -> CmdResult<String> {
+    let conn = db.conn.lock().map_err(map_err)?;
+
+    let mut projects = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, thumbnail_path, created_at, updated_at FROM projects ORDER BY name"
+        ).map_err(map_err)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "description": row.get::<_, String>(2)?,
+                "thumbnail_path": row.get::<_, Option<String>>(3)?,
+                "created_at": row.get::<_, String>(4)?,
+                "updated_at": row.get::<_, String>(5)?,
+            }))
+        }).map_err(map_err)?;
+        for row in rows {
+            projects.push(row.map_err(map_err)?);
+        }
+    }
+
+    let mut tags = Vec::new();
+    {
+        let mut stmt = conn.prepare("SELECT id, name, color FROM tags ORDER BY name").map_err(map_err)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "color": row.get::<_, String>(2)?,
+            }))
+        }).map_err(map_err)?;
+        for row in rows {
+            tags.push(row.map_err(map_err)?);
+        }
+    }
+
+    let mut collections = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, created_at, updated_at FROM collections ORDER BY name"
+        ).map_err(map_err)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "description": row.get::<_, String>(2)?,
+                "created_at": row.get::<_, String>(3)?,
+                "updated_at": row.get::<_, String>(4)?,
+            }))
+        }).map_err(map_err)?;
+        for row in rows {
+            collections.push(row.map_err(map_err)?);
+        }
+    }
+
+    let export = serde_json::json!({
+        "version": 1,
+        "exported_at": Utc::now().to_rfc3339(),
+        "projects": projects,
+        "tags": tags,
+        "collections": collections,
+    });
+
+    serde_json::to_string_pretty(&export).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn get_data_dir() -> String {
+    Database::data_dir().to_string_lossy().to_string()
+}
+
 // ── Helpers ──
 
 fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {

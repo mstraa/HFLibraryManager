@@ -4,9 +4,18 @@ import ProjectCard from "./ProjectCard";
 interface ProjectGridProps {
   projects: ProjectSummary[];
   onProjectClick: (id: string) => void;
+  selectedIds: string[];
+  onToggleSelect: (id: string) => void;
 }
 
-export default function ProjectGrid({ projects, onProjectClick }: ProjectGridProps) {
+export default function ProjectGrid({
+  projects,
+  onProjectClick,
+  selectedIds,
+  onToggleSelect,
+}: ProjectGridProps) {
+  const selectionMode = selectedIds.length > 0;
+
   if (projects.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -41,6 +50,9 @@ export default function ProjectGrid({ projects, onProjectClick }: ProjectGridPro
             key={project.id}
             project={project}
             onClick={onProjectClick}
+            selected={selectedIds.includes(project.id)}
+            selectionMode={selectionMode}
+            onToggleSelect={onToggleSelect}
           />
         ))}
       </div>
