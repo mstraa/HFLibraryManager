@@ -75,7 +75,7 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className="w-56 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-4 flex flex-col gap-5 overflow-y-auto">
+      <aside className="w-56 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-4 pt-10 flex flex-col gap-5 overflow-y-auto">
         <button
           onClick={onCreateProject}
           className="w-full py-2 px-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"

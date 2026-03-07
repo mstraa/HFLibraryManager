@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import type { SortBy, SortOrder } from "../lib/types";
+import { onDragMouseDown } from "../hooks/useDrag";
 
 interface SearchBarProps {
   search: string;
@@ -25,7 +26,7 @@ export default function SearchBar({
   onExport,
 }: SearchBarProps) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <div className="flex items-center gap-3 px-4 py-3 pt-10 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800" onMouseDown={onDragMouseDown}>
       {/* Search */}
       <div className="relative flex-1">
         <svg

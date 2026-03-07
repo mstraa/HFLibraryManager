@@ -17,6 +17,7 @@ import type { Project, Asset, AssetType, TagWithCount, Collection } from "../lib
 import MarkdownEditor from "./MarkdownEditor";
 import AssetSection from "./AssetSection";
 import ConfirmDialog from "./ConfirmDialog";
+import { onDragMouseDown } from "../hooks/useDrag";
 
 const ASSET_TYPES: AssetType[] = ["affinity", "hueforge", "bambulab"];
 
@@ -141,7 +142,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   return (
     <div className="flex-1 flex flex-col h-screen bg-white dark:bg-gray-900">
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 pt-10 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0" onMouseDown={onDragMouseDown}>
         <button
           onClick={onBack}
           className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
