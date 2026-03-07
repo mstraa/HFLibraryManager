@@ -28,8 +28,8 @@ export async function deleteProject(id: string): Promise<void> {
   return invoke("delete_project", { id });
 }
 
-export async function listProjects(filters?: ListProjectsRequest): Promise<ProjectSummary[]> {
-  return invoke("list_projects", { req: filters ?? {} });
+export async function listProjects(filters: ListProjectsRequest = {}): Promise<ProjectSummary[]> {
+  return invoke("list_projects", { req: filters });
 }
 
 export async function setProjectThumbnail(projectId: string, sourcePath: string): Promise<string> {

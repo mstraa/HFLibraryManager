@@ -1,113 +1,91 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listProjects, createProject } from "./lib/api";
-import type { ProjectSummary } from "./lib/types";
+import type { ProjectSummary, SortBy, SortOrder } from "./lib/types";
+import Sidebar from "./components/Sidebar";
+import SearchBar from "./components/SearchBar";
+import ProjectGrid from "./components/ProjectGrid";
+import CreateProjectDialog from "./components/CreateProjectDialog";
 import "./App.css";
 
 function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [newName, setNewName] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("updated_at");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
+  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
 
-  useEffect(() => {
-    loadProjects();
-  }, []);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function loadProjects() {
-    const result = await listProjects();
+  const loadProjects = useCallback(async () => {
+    const result = await listProjects({
+      search: search || undefined,
+      tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
+      collection_id: selectedCollection,
+      asset_types: selectedAssetTypes.length > 0 ? selectedAssetTypes : undefined,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    });
     setProjects(result);
-  }
+  }, [search, selectedTags, selectedCollection, selectedAssetTypes, sortBy, sortOrder]);
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    await createProject(newName.trim());
-    setNewName("");
+  // Reload when filters change (debounce search)
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(loadProjects, search ? 200 : 0);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [loadProjects, search]);
+
+  async function handleCreate(name: string, description: string) {
+    await createProject(name, description || undefined);
+    setShowCreate(false);
     await loadProjects();
   }
 
+  function handleProjectClick(id: string) {
+    // Phase 3 will add navigation to project detail
+    console.log("Open project:", id);
+  }
+
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      <h1>3D Print Manager</h1>
+    <div className="h-screen flex bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <Sidebar
+        selectedTags={selectedTags}
+        onTagsChange={setSelectedTags}
+        selectedCollection={selectedCollection}
+        onCollectionChange={setSelectedCollection}
+        selectedAssetTypes={selectedAssetTypes}
+        onAssetTypesChange={setSelectedAssetTypes}
+        onCreateProject={() => setShowCreate(true)}
+      />
 
-      <form onSubmit={handleCreate} style={{ marginBottom: "2rem", display: "flex", gap: "0.5rem" }}>
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="New project name..."
-          style={{
-            flex: 1, padding: "0.5rem 0.75rem",
-            borderRadius: "6px", border: "1px solid #ccc",
-            fontSize: "1rem",
-          }}
+      <div className="flex-1 flex flex-col min-w-0">
+        <SearchBar
+          search={search}
+          onSearchChange={setSearch}
+          sortBy={sortBy}
+          onSortByChange={setSortBy}
+          sortOrder={sortOrder}
+          onSortOrderChange={setSortOrder}
+          projectCount={projects.length}
         />
-        <button
-          type="submit"
-          style={{
-            padding: "0.5rem 1.5rem", borderRadius: "6px",
-            background: "#6366f1", color: "white", border: "none",
-            fontSize: "1rem", cursor: "pointer",
-          }}
-        >
-          Create
-        </button>
-      </form>
 
-      {projects.length === 0 ? (
-        <p style={{ color: "#888" }}>No projects yet. Create your first one above.</p>
-      ) : (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-          gap: "1rem",
-        }}>
-          {projects.map((p) => (
-            <div
-              key={p.id}
-              style={{
-                border: "1px solid #e2e2e2",
-                borderRadius: "8px",
-                padding: "1rem",
-                background: "#fafafa",
-              }}
-            >
-              <div style={{
-                width: "100%", aspectRatio: "4/3",
-                background: "#e5e7eb", borderRadius: "6px",
-                marginBottom: "0.75rem",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#9ca3af", fontSize: "2rem",
-              }}>
-                {p.thumbnail_path ? (
-                  <img
-                    src={`asset://localhost/${p.thumbnail_path}`}
-                    alt={p.name}
-                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "6px" }}
-                  />
-                ) : "🖼"}
-              </div>
-              <h3 style={{ margin: 0, fontSize: "0.95rem" }}>{p.name}</h3>
-              <div style={{ display: "flex", gap: "0.25rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
-                {p.tags.map((t) => (
-                  <span key={t.id} style={{
-                    fontSize: "0.7rem", padding: "0.1rem 0.4rem",
-                    borderRadius: "9999px", background: t.color, color: "white",
-                  }}>
-                    {t.name}
-                  </span>
-                ))}
-                {p.asset_types.map((at) => (
-                  <span key={at} style={{
-                    fontSize: "0.65rem", padding: "0.1rem 0.4rem",
-                    borderRadius: "4px", background: "#e5e7eb", color: "#6b7280",
-                  }}>
-                    {at}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </main>
+        <ProjectGrid
+          projects={projects}
+          onProjectClick={handleProjectClick}
+        />
+      </div>
+
+      <CreateProjectDialog
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreate={handleCreate}
+      />
+    </div>
   );
 }
 
