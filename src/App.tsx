@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, exportData } from "./lib/api";
+import { listProjects, createProject, importFiles, listFolderFiles, exportData } from "./lib/api";
 import type { ProjectSummary, SortBy, SortOrder } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
@@ -18,6 +18,8 @@ function App() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
   const [selectedCreator, setSelectedCreator] = useState<string | undefined>();
+  const [selectedFilament, setSelectedFilament] = useState<string | undefined>();
+  const [selectedSize, setSelectedSize] = useState<string | undefined>();
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
@@ -32,11 +34,13 @@ function App() {
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       collection_id: selectedCollection,
       creator: selectedCreator,
+      filament: selectedFilament,
+      size: selectedSize,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, selectedCollection, selectedCreator, sortBy, sortOrder]);
+  }, [search, selectedTags, selectedCollection, selectedCreator, selectedFilament, selectedSize, sortBy, sortOrder]);
 
   // Reload when filters change (debounce search)
   useEffect(() => {
@@ -47,8 +51,14 @@ function App() {
     };
   }, [loadProjects, search]);
 
-  async function handleCreate(name: string, description: string) {
+  async function handleCreate(name: string, description: string, importFolder?: string) {
     const project = await createProject(name, description || undefined);
+    if (importFolder) {
+      const filePaths = await listFolderFiles(importFolder);
+      if (filePaths.length > 0) {
+        await importFiles(project.id, filePaths);
+      }
+    }
     setShowCreate(false);
     setActiveProjectId(project.id);
   }
@@ -118,6 +128,10 @@ function App() {
         onCollectionChange={setSelectedCollection}
         selectedCreator={selectedCreator}
         onCreatorChange={setSelectedCreator}
+        selectedFilament={selectedFilament}
+        onFilamentChange={setSelectedFilament}
+        selectedSize={selectedSize}
+        onSizeChange={setSelectedSize}
         onCreateProject={() => setShowCreate(true)}
         refreshKey={sidebarRefreshKey}
       />

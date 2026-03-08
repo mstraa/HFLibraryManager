@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { listTags, listCollections, listCreators, getLibraryPath, setLibraryPath } from "../lib/api";
-import type { TagWithCount, Collection } from "../lib/types";
+import { listTags, listCollections, listCreators, listAllFilaments, listAllSizes, getLibraryPath, setLibraryPath } from "../lib/api";
+import type { TagWithCount, Collection, FilamentInfo } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
 
@@ -12,6 +12,10 @@ interface SidebarProps {
   onCollectionChange: (id: string | undefined) => void;
   selectedCreator: string | undefined;
   onCreatorChange: (creator: string | undefined) => void;
+  selectedFilament: string | undefined;
+  onFilamentChange: (filament: string | undefined) => void;
+  selectedSize: string | undefined;
+  onSizeChange: (size: string | undefined) => void;
   onCreateProject: () => void;
   refreshKey?: number;
 }
@@ -23,12 +27,18 @@ export default function Sidebar({
   onCollectionChange,
   selectedCreator,
   onCreatorChange,
+  selectedFilament,
+  onFilamentChange,
+  selectedSize,
+  onSizeChange,
   onCreateProject,
   refreshKey,
 }: SidebarProps) {
   const [tags, setTags] = useState<TagWithCount[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [creators, setCreators] = useState<string[]>([]);
+  const [filaments, setFilaments] = useState<FilamentInfo[]>([]);
+  const [sizes, setSizes] = useState<string[]>([]);
   const [showTagManager, setShowTagManager] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
   const [libraryPath, setLibraryPathState] = useState("");
@@ -36,10 +46,14 @@ export default function Sidebar({
   const [pendingPath, setPendingPath] = useState("");
 
   const loadFilters = useCallback(async () => {
-    const [t, c, cr, lp] = await Promise.all([listTags(), listCollections(), listCreators(), getLibraryPath()]);
+    const [t, c, cr, fl, sz, lp] = await Promise.all([
+      listTags(), listCollections(), listCreators(), listAllFilaments(), listAllSizes(), getLibraryPath(),
+    ]);
     setTags(t);
     setCollections(c);
     setCreators(cr);
+    setFilaments(fl);
+    setSizes(sz);
     setLibraryPathState(lp);
   }, []);
 
@@ -59,12 +73,16 @@ export default function Sidebar({
     onTagsChange([]);
     onCollectionChange(undefined);
     onCreatorChange(undefined);
+    onFilamentChange(undefined);
+    onSizeChange(undefined);
   }
 
   const hasFilters =
     selectedTags.length > 0 ||
     selectedCollection !== undefined ||
-    selectedCreator !== undefined;
+    selectedCreator !== undefined ||
+    selectedFilament !== undefined ||
+    selectedSize !== undefined;
 
   async function handleChangeLibraryPath() {
     const selected = await open({ directory: true, multiple: false });
@@ -224,6 +242,72 @@ export default function Sidebar({
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Filaments */}
+        {filaments.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+              Filaments
+            </h3>
+            <div className="flex flex-wrap gap-1.5">
+              {filaments.map((f) => {
+                const key = `${f.brand}|${f.name}`;
+                const isActive = selectedFilament === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => onFilamentChange(isActive ? undefined : key)}
+                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
+                      isActive
+                        ? "ring-2 ring-offset-1 ring-indigo-400"
+                        : "opacity-70 hover:opacity-100"
+                    }`}
+                    style={{
+                      backgroundColor: f.color + "22",
+                      borderColor: f.color,
+                    }}
+                    title={`${f.brand} ${f.name} (${f.color})`}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-gray-300 dark:border-gray-500"
+                      style={{ backgroundColor: f.color }}
+                    />
+                    <span className="text-gray-700 dark:text-gray-300 truncate max-w-[100px]">
+                      {f.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Sizes */}
+        {sizes.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+              Sizes
+            </h3>
+            <div className="flex flex-wrap gap-1.5">
+              {sizes.map((s) => {
+                const isActive = selectedSize === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => onSizeChange(isActive ? undefined : s)}
+                    className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border border-gray-300 dark:border-gray-600 ${
+                      isActive
+                        ? "ring-2 ring-offset-1 ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
+                        : "text-gray-600 dark:text-gray-400 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 

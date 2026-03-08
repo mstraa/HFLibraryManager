@@ -15,7 +15,7 @@ import {
   removeProjectFromCollection,
   listCreators,
 } from "../lib/api";
-import type { Project, ProjectFile, TagWithCount, Collection } from "../lib/types";
+import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, FilamentInfo } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
 import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
@@ -37,6 +37,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [creators, setCreators] = useState<string[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
 
   const loadProject = useCallback(async (sync = false) => {
     if (sync) {
@@ -133,6 +134,30 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
     onDeleted();
   }
 
+  // Aggregate metadata from favorited files
+  const favoritedMeta: FileMetadata[] = files
+    .filter(f => f.favorited)
+    .map(f => {
+      try { return JSON.parse(f.metadata) as FileMetadata; }
+      catch { return {} as FileMetadata; }
+    })
+    .filter(m => m.filaments || m.width_mm || m.height_mm);
+
+  // Collect unique filaments across all favorited files
+  const allFilaments: FilamentInfo[] = [];
+  const seen = new Set<string>();
+  for (const m of favoritedMeta) {
+    for (const f of m.filaments ?? []) {
+      const key = `${f.color}|${f.name}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allFilaments.push(f);
+      }
+    }
+  }
+
+  // Get dimensions from first file that has them
+  const dimsSource = favoritedMeta.find(m => m.width_mm || m.height_mm);
   if (!project) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -309,16 +334,89 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
             </div>
           </div>
 
+          {/* HueForge Info */}
+          {(allFilaments.length > 0 || dimsSource) && (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+              <div className="flex flex-wrap gap-6">
+                {/* Filaments */}
+                {allFilaments.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                      Filaments ({allFilaments.length})
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {allFilaments.map((f, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                        >
+                          <div
+                            className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
+                            style={{ backgroundColor: f.color }}
+                            title={f.color}
+                          />
+                          <span className="text-gray-700 dark:text-gray-300">
+                            {f.brand} {f.name}
+                          </span>
+                          <span className="text-gray-400 dark:text-gray-500 font-mono text-[10px]">
+                            {f.color}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dimensions */}
+                {dimsSource && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                      Print Info
+                    </h3>
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      {dimsSource.width_mm && dimsSource.height_mm && (
+                        <div className="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                          <span className="text-gray-400 dark:text-gray-500">Size </span>
+                          {dimsSource.width_mm.toFixed(1)} x {dimsSource.height_mm.toFixed(1)} mm
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Notes */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Notes
-            </h3>
-            <MarkdownEditor
-              value={project.description}
-              onChange={handleDescriptionChange}
-              onBlur={handleDescriptionBlur}
-            />
+            <button
+              onClick={() => setNotesOpen(!notesOpen)}
+              className="flex items-center gap-1.5 cursor-pointer group"
+            >
+              <svg
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${notesOpen ? "rotate-90" : ""}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                Notes
+              </h3>
+              {!notesOpen && project.description && (
+                <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[200px]">
+                  — {project.description.split("\n")[0]}
+                </span>
+              )}
+            </button>
+            {notesOpen && (
+              <div className="mt-2">
+                <MarkdownEditor
+                  value={project.description}
+                  onChange={handleDescriptionChange}
+                  onBlur={handleDescriptionBlur}
+                />
+              </div>
+            )}
           </div>
 
           {/* Files */}
@@ -330,6 +428,10 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
               files={files}
               projectId={projectId}
               onRefresh={loadProject}
+              onSetThumbnail={async (filePath) => {
+                await setProjectThumbnail(projectId, filePath);
+                loadProject();
+              }}
             />
           </div>
         </div>

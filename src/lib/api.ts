@@ -6,6 +6,7 @@ import type {
   TagWithCount,
   Collection,
   ProjectFile,
+  FilamentInfo,
   ListProjectsRequest,
 } from "./types";
 
@@ -63,6 +64,16 @@ export async function listCreators(): Promise<string[]> {
   return invoke("list_creators");
 }
 
+// ── Filament & Size Filters ──
+
+export async function listAllFilaments(): Promise<FilamentInfo[]> {
+  return invoke("list_all_filaments");
+}
+
+export async function listAllSizes(): Promise<string[]> {
+  return invoke("list_all_sizes");
+}
+
 // ── Collections ──
 
 export async function createCollection(name: string, description?: string): Promise<Collection> {
@@ -97,6 +108,10 @@ export async function getProjectFiles(projectId: string): Promise<ProjectFile[]>
 
 export async function importFiles(projectId: string, sourcePaths: string[]): Promise<ProjectFile[]> {
   return invoke("import_files", { projectId, sourcePaths });
+}
+
+export async function listFolderFiles(path: string): Promise<string[]> {
+  return invoke("list_folder_files", { path });
 }
 
 export async function deleteFile(fileId: string): Promise<void> {

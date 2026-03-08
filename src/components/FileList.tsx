@@ -15,22 +15,24 @@ import type { ProjectFile } from "../lib/types";
 // ── File grouping ──
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "svg", "af", "afdesign", "afphoto", "afpub", "psd", "ai", "xcf", "kra"]);
-const HUEFORGE_EXTS = new Set(["hfp", "hfm", "stl", "txt"]);
+const HUEFORGE_EXTS = new Set(["hfp", "hfm"]);
+const HUEFORGE_EXPORT_EXTS = new Set(["stl", "txt"]);
 const PRINT_EXTS = new Set(["3mf"]);
 
 const PREVIEW_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
 const PREVIEW_TEXT_EXTS = new Set(["txt"]);
 
-type FileGroup = "design" | "hueforge" | "print" | "other";
+type FileGroup = "design" | "hueforge" | "hueforge_export" | "print" | "other";
 
 const GROUP_CONFIG: Record<FileGroup, { label: string; color: string }> = {
   design: { label: "Design / Images", color: "#4a90d9" },
   hueforge: { label: "HueForge", color: "#e67e22" },
+  hueforge_export: { label: "HueForge Export", color: "#d4841a" },
   print: { label: "3MF / Print", color: "#2ecc71" },
   other: { label: "Other", color: "#6b7280" },
 };
 
-const GROUP_ORDER: FileGroup[] = ["design", "hueforge", "print", "other"];
+const GROUP_ORDER: FileGroup[] = ["design", "hueforge", "hueforge_export", "print", "other"];
 
 function getExt(filename: string): string {
   const parts = filename.split(".");
@@ -41,6 +43,7 @@ function getGroup(filename: string): FileGroup {
   const ext = getExt(filename);
   if (PRINT_EXTS.has(ext)) return "print";
   if (HUEFORGE_EXTS.has(ext)) return "hueforge";
+  if (HUEFORGE_EXPORT_EXTS.has(ext)) return "hueforge_export";
   if (IMAGE_EXTS.has(ext)) return "design";
   return "other";
 }
@@ -127,6 +130,7 @@ function FileRow({
   onDelete,
   onEditNotes,
   onToggleFavorite,
+  onSetThumbnail,
 }: {
   file: ProjectFile;
   isSelected: boolean;
@@ -134,6 +138,7 @@ function FileRow({
   onDelete: () => void;
   onEditNotes: (id: string, notes: string) => void;
   onToggleFavorite: () => void;
+  onSetThumbnail?: () => void;
 }) {
   const ext = getExt(file.original_filename);
   const canPreview = PREVIEW_IMAGE_EXTS.has(ext) || PREVIEW_TEXT_EXTS.has(ext);
@@ -218,6 +223,17 @@ function FileRow({
         {!canPreview && (
           <span className="text-[9px] text-gray-400 dark:text-gray-500 mr-1">Finder</span>
         )}
+        {onSetThumbnail && (
+          <button
+            onClick={onSetThumbnail}
+            className="p-1 text-gray-400 hover:text-indigo-500 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+            title="Set as project thumbnail"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </button>
+        )}
         <button
           onClick={() => { setEditing(true); setNotesInput(file.notes); }}
           className="p-1 text-gray-400 hover:text-indigo-500 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
@@ -258,20 +274,23 @@ function FileRow({
 
 // ── Main Component ──
 
+const THUMBNAIL_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
+
 interface FileListProps {
   files: ProjectFile[];
   projectId: string;
   onRefresh: () => void;
+  onSetThumbnail?: (filePath: string) => void;
 }
 
-export default function FileList({ files, projectId, onRefresh }: FileListProps) {
+export default function FileList({ files, projectId, onRefresh, onSetThumbnail }: FileListProps) {
   const [previewFile, setPreviewFile] = useState<ProjectFile | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   // Separate favorites and group remaining files
   const favorites = files.filter(f => f.favorited);
   const nonFavorites = files.filter(f => !f.favorited);
-  const groups: Record<FileGroup, ProjectFile[]> = { design: [], hueforge: [], print: [], other: [] };
+  const groups: Record<FileGroup, ProjectFile[]> = { design: [], hueforge: [], hueforge_export: [], print: [], other: [] };
   for (const f of nonFavorites) {
     groups[getGroup(f.original_filename)].push(f);
   }
@@ -388,6 +407,7 @@ export default function FileList({ files, projectId, onRefresh }: FileListProps)
                       onDelete={() => handleDelete(file.id)}
                       onEditNotes={handleEditNotes}
                       onToggleFavorite={() => handleToggleFavorite(file.id)}
+                      onSetThumbnail={onSetThumbnail && THUMBNAIL_EXTS.has(getExt(file.original_filename)) ? () => onSetThumbnail(file.file_path) : undefined}
                     />
                   ))}
                 </div>
@@ -421,6 +441,7 @@ export default function FileList({ files, projectId, onRefresh }: FileListProps)
                         onDelete={() => handleDelete(file.id)}
                         onEditNotes={handleEditNotes}
                         onToggleFavorite={() => handleToggleFavorite(file.id)}
+                        onSetThumbnail={onSetThumbnail && THUMBNAIL_EXTS.has(getExt(file.original_filename)) ? () => onSetThumbnail(file.file_path) : undefined}
                       />
                     ))}
                   </div>

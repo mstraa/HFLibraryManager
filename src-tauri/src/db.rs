@@ -195,6 +195,19 @@ impl Database {
             }
         }
 
+        // Migration: add metadata column to files
+        let has_metadata: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'metadata'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if !has_metadata {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}';"
+            )?;
+        }
+
         // Migration: add favorited column to files
         let has_favorited: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'favorited'",

@@ -46,6 +46,21 @@ export interface CollectionSummary {
   name: string;
 }
 
+export interface FilamentInfo {
+  color: string;
+  name: string;
+  brand: string;
+}
+
+export interface FileMetadata {
+  filament_count?: number;
+  filaments?: FilamentInfo[];
+  width_mm?: number;
+  height_mm?: number;
+  layer_height?: number;
+  max_thickness?: number;
+}
+
 export interface ProjectFile {
   id: string;
   project_id: string;
@@ -55,6 +70,7 @@ export interface ProjectFile {
   notes: string;
   thumbnail_path: string | null;
   favorited: boolean;
+  metadata: string;
   created_at: string;
 }
 
@@ -66,6 +82,8 @@ export interface ListProjectsRequest {
   tag_ids?: string[];
   collection_id?: string;
   creator?: string;
+  filament?: string;
+  size?: string;
   sort_by?: SortBy;
   sort_order?: SortOrder;
 }

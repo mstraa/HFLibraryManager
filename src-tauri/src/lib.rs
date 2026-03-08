@@ -42,6 +42,9 @@ pub fn run() {
             commands::set_project_tags,
             // Creators
             commands::list_creators,
+            // Filament & Size filters
+            commands::list_all_filaments,
+            commands::list_all_sizes,
             // Collections
             commands::create_collection,
             commands::list_collections,
@@ -52,6 +55,7 @@ pub fn run() {
             // Files
             commands::get_project_files,
             commands::import_files,
+            commands::list_folder_files,
             commands::delete_file,
             commands::update_file_notes,
             commands::toggle_file_favorite,

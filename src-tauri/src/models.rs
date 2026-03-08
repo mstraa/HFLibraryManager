@@ -67,7 +67,31 @@ pub struct ProjectFile {
     pub notes: String,
     pub thumbnail_path: Option<String>,
     pub favorited: bool,
+    pub metadata: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FilamentInfo {
+    pub color: String,
+    pub name: String,
+    pub brand: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct FileMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filament_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filaments: Option<Vec<FilamentInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_mm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height_mm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_height: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_thickness: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -121,6 +145,8 @@ pub struct ListProjectsRequest {
     pub tag_ids: Option<Vec<String>>,
     pub collection_id: Option<String>,
     pub creator: Option<String>,
+    pub filament: Option<String>,
+    pub size: Option<String>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
 }

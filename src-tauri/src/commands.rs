@@ -161,8 +161,43 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         if !creator.is_empty() {
             conditions.push(format!("p.creator = ?{}", param_idx));
             params.push(Box::new(creator.clone()));
+            param_idx += 1;
         }
     }
+
+    // Filter by filament (format: "brand|name")
+    if let Some(filament) = &req.filament {
+        if !filament.is_empty() {
+            let parts: Vec<&str> = filament.splitn(2, '|').collect();
+            if parts.len() == 2 {
+                conditions.push(format!(
+                    "p.id IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
+                     WHERE f.favorited = 1 AND json_extract(je.value, '$.brand') = ?{} AND json_extract(je.value, '$.name') = ?{})",
+                    param_idx, param_idx + 1
+                ));
+                params.push(Box::new(parts[0].to_string()));
+                params.push(Box::new(parts[1].to_string()));
+                param_idx += 2;
+            }
+        }
+    }
+
+    // Filter by size (format: "50x50mm")
+    if let Some(size) = &req.size {
+        if !size.is_empty() {
+            conditions.push(format!(
+                "p.id IN (SELECT f.project_id FROM files f \
+                 WHERE f.favorited = 1 \
+                 AND CAST(ROUND(json_extract(f.metadata, '$.width_mm')) AS INTEGER) || 'x' || \
+                     CAST(ROUND(json_extract(f.metadata, '$.height_mm')) AS INTEGER) || 'mm' = ?{})",
+                param_idx
+            ));
+            params.push(Box::new(size.clone()));
+            param_idx += 1;
+        }
+    }
+
+    let _ = param_idx; // suppress unused warning
 
     let sort_col = match req.sort_by.as_deref() {
         Some("name") => "p.name",
@@ -373,7 +408,7 @@ pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<V
     let conn = db.conn.lock().map_err(map_err)?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, created_at
+        "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at
          FROM files WHERE project_id = ?1 ORDER BY created_at DESC"
     ).map_err(map_err)?;
 
@@ -387,7 +422,8 @@ pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<V
             notes: row.get(5)?,
             thumbnail_path: row.get(6)?,
             favorited: row.get::<_, i32>(7)? != 0,
-            created_at: row.get(8)?,
+            metadata: row.get(8)?,
+            created_at: row.get(9)?,
         })
     }).map_err(map_err)?;
 
@@ -488,6 +524,7 @@ pub fn import_files(
             notes: String::new(),
             thumbnail_path: thumb_path,
             favorited: false,
+            metadata: "{}".to_string(),
             created_at: now.clone(),
         });
     }
@@ -532,17 +569,182 @@ pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) ->
 #[tauri::command]
 pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<bool> {
     let conn = db.conn.lock().map_err(map_err)?;
-    let current: i32 = conn.query_row(
-        "SELECT favorited FROM files WHERE id = ?1",
+    let (current, file_path, filename): (i32, String, String) = conn.query_row(
+        "SELECT favorited, file_path, original_filename FROM files WHERE id = ?1",
         rusqlite::params![file_id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).map_err(map_err)?;
     let new_val = if current != 0 { 0 } else { 1 };
-    conn.execute(
-        "UPDATE files SET favorited = ?1 WHERE id = ?2",
-        rusqlite::params![new_val, file_id],
-    ).map_err(map_err)?;
+
+    // Parse metadata when favoriting
+    if new_val == 1 {
+        let metadata = parse_file_metadata(&file_path, &filename);
+        let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
+        conn.execute(
+            "UPDATE files SET favorited = 1, metadata = ?1 WHERE id = ?2",
+            rusqlite::params![metadata_json, file_id],
+        ).map_err(map_err)?;
+
+    } else {
+        conn.execute(
+            "UPDATE files SET favorited = 0, metadata = '{}' WHERE id = ?1",
+            rusqlite::params![file_id],
+        ).map_err(map_err)?;
+    }
+
     Ok(new_val != 0)
+}
+
+fn parse_file_metadata(file_path: &str, filename: &str) -> FileMetadata {
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "txt" => parse_hueforge_txt(file_path),
+        "hfp" => parse_hueforge_hfp(file_path),
+        _ => FileMetadata::default(),
+    }
+}
+
+fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
+    let content = match fs::read_to_string(file_path) {
+        Ok(c) => c,
+        Err(_) => return FileMetadata::default(),
+    };
+
+    let mut filaments: Vec<FilamentInfo> = Vec::new();
+    let mut filament_count = None;
+    let mut width_mm = None;
+    let mut height_mm = None;
+    let mut layer_height = None;
+    let mut max_thickness = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Parse filament lines: "#c00d1e PLA BambuLab Basic Red  Transmission Distance: 4"
+        if trimmed.starts_with('#') && trimmed.len() > 7 {
+            let hex = &trimmed[..7];
+            if hex.len() == 7 && hex[1..].chars().all(|c| c.is_ascii_hexdigit()) {
+                let rest = trimmed[7..].trim();
+                // Extract name before "Transmission Distance"
+                let name_part = if let Some(idx) = rest.find("Transmission Distance") {
+                    rest[..idx].trim()
+                } else {
+                    rest
+                };
+                // Split: "PLA BambuLab Basic Red" -> brand="BambuLab Basic", name="Red"
+                let parts: Vec<&str> = name_part.split_whitespace().collect();
+                let (brand, name) = if parts.len() >= 4 {
+                    // parts[0] = material type (PLA), parts[1..n-1] = brand, parts[n-1] = color name
+                    // Heuristic: brand is typically 2 words after material type
+                    let brand = format!("{} {}", parts[1], parts[2]);
+                    let color_name = parts[3..].join(" ");
+                    (brand, color_name)
+                } else if parts.len() == 3 {
+                    (parts[1].to_string(), parts[2].to_string())
+                } else {
+                    (name_part.to_string(), name_part.to_string())
+                };
+
+                // Deduplicate
+                if !filaments.iter().any(|f| f.color == hex && f.name == name) {
+                    filaments.push(FilamentInfo {
+                        color: hex.to_string(),
+                        name,
+                        brand,
+                    });
+                }
+            }
+        }
+
+        // Parse filament count: "This print uses 5 unique filaments"
+        if trimmed.contains("unique filament") {
+            if let Some(num) = trimmed.split_whitespace()
+                .find_map(|w| w.parse::<i32>().ok()) {
+                filament_count = Some(num);
+            }
+        }
+
+        // Parse size: "The Model is 50.03x50.03mm in size"
+        if trimmed.contains("Model is") && trimmed.contains("mm in size") {
+            if let Some(dims) = trimmed.split("Model is").nth(1) {
+                if let Some(dims) = dims.split("mm").next() {
+                    let dims = dims.trim();
+                    let parts: Vec<&str> = dims.split('x').collect();
+                    if parts.len() == 2 {
+                        width_mm = parts[0].trim().parse().ok();
+                        height_mm = parts[1].trim().parse().ok();
+                    }
+                }
+            }
+        }
+
+        // Parse layer height: "layer height of 0.08mm"
+        if trimmed.contains("layer height of") {
+            if let Some(after) = trimmed.split("layer height of").nth(1) {
+                if let Some(val) = after.trim().strip_suffix("mm") {
+                    layer_height = val.trim().parse().ok();
+                } else {
+                    layer_height = after.split("mm").next()
+                        .and_then(|v| v.trim().parse().ok());
+                }
+            }
+        }
+
+        // Parse max thickness: "Max allowed Thickness is 1.6mm"
+        if trimmed.contains("Max allowed Thickness is") {
+            if let Some(after) = trimmed.split("Max allowed Thickness is").nth(1) {
+                max_thickness = after.split("mm").next()
+                    .and_then(|v| v.trim().parse().ok());
+            }
+        }
+    }
+
+    FileMetadata {
+        filament_count,
+        filaments: if filaments.is_empty() { None } else { Some(filaments) },
+        width_mm,
+        height_mm,
+        layer_height,
+        max_thickness,
+    }
+}
+
+fn parse_hueforge_hfp(file_path: &str) -> FileMetadata {
+    let content = match fs::read_to_string(file_path) {
+        Ok(c) => c,
+        Err(_) => return FileMetadata::default(),
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return FileMetadata::default(),
+    };
+
+    let width_mm = json.get("width_in_mm").and_then(|v| v.as_f64());
+    let height_mm = json.get("height_in_mm").and_then(|v| v.as_f64());
+    let layer_height = json.get("layer_height").and_then(|v| v.as_f64());
+    let max_thickness = json.get("max_thickness").and_then(|v| v.as_f64());
+
+    let mut filaments: Vec<FilamentInfo> = Vec::new();
+    if let Some(arr) = json.get("filament_set").and_then(|v| v.as_array()) {
+        for item in arr {
+            let color = item.get("Color").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = item.get("Name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let brand = item.get("Brand").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if !color.is_empty() && !filaments.iter().any(|f| f.color == color && f.name == name) {
+                filaments.push(FilamentInfo { color, name, brand });
+            }
+        }
+    }
+
+    FileMetadata {
+        filament_count: if filaments.is_empty() { None } else { Some(filaments.len() as i32) },
+        filaments: if filaments.is_empty() { None } else { Some(filaments) },
+        width_mm,
+        height_mm,
+        layer_height,
+        max_thickness,
+    }
 }
 
 #[tauri::command]
@@ -565,6 +767,25 @@ pub fn set_project_thumbnail(db: State<Database>, project_id: String, source_pat
     ).map_err(map_err)?;
 
     Ok(dest_str)
+}
+
+/// List all file paths in a directory (non-recursive, files only, skip hidden)
+#[tauri::command]
+pub fn list_folder_files(path: String) -> CmdResult<Vec<String>> {
+    let dir = Path::new(&path);
+    if !dir.is_dir() {
+        return Err("Not a directory".to_string());
+    }
+    let mut files: Vec<String> = Vec::new();
+    for entry in fs::read_dir(dir).map_err(map_err)?.flatten() {
+        let p = entry.path();
+        if !p.is_file() { continue; }
+        let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+        if name.starts_with('.') { continue; }
+        files.push(p.to_string_lossy().to_string());
+    }
+    files.sort();
+    Ok(files)
 }
 
 // ── File Operations ──
@@ -671,6 +892,51 @@ pub fn list_creators(db: State<Database>) -> CmdResult<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT creator FROM projects ORDER BY creator"
     ).map_err(map_err)?;
+    let rows = stmt.query_map([], |row| row.get(0)).map_err(map_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+}
+
+// ── Filament & Size Filters ──
+
+#[tauri::command]
+pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT
+            json_extract(je.value, '$.color') as color,
+            json_extract(je.value, '$.name') as name,
+            json_extract(je.value, '$.brand') as brand
+         FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
+         WHERE files.favorited = 1
+           AND json_extract(files.metadata, '$.filaments') IS NOT NULL
+         ORDER BY brand, name"
+    ).map_err(map_err)?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(FilamentInfo {
+            color: row.get(0)?,
+            name: row.get(1)?,
+            brand: row.get(2)?,
+        })
+    }).map_err(map_err)?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT
+            CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
+            CAST(ROUND(json_extract(metadata, '$.height_mm')) AS INTEGER) || 'mm' as size
+         FROM files
+         WHERE favorited = 1
+           AND json_extract(metadata, '$.width_mm') IS NOT NULL
+           AND json_extract(metadata, '$.height_mm') IS NOT NULL
+         ORDER BY size"
+    ).map_err(map_err)?;
+
     let rows = stmt.query_map([], |row| row.get(0)).map_err(map_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
 }
