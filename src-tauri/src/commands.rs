@@ -23,8 +23,8 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
     let description = req.description.unwrap_or_default();
 
     conn.execute(
-        "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, req.name, description, now, now],
+        "INSERT INTO projects (id, name, description, creator, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, req.name, description, "Me", now, now],
     ).map_err(map_err)?;
 
     // Create project directory
@@ -37,6 +37,7 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
         id,
         name: req.name,
         description,
+        creator: "Me".to_string(),
         thumbnail_path: None,
         created_at: now.clone(),
         updated_at: now,
@@ -50,7 +51,7 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
     let conn = db.conn.lock().map_err(map_err)?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, thumbnail_path, created_at, updated_at FROM projects WHERE id = ?1"
+        "SELECT id, name, description, creator, thumbnail_path, created_at, updated_at FROM projects WHERE id = ?1"
     ).map_err(map_err)?;
 
     let project = stmt.query_row(rusqlite::params![id], |row| {
@@ -58,9 +59,10 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
             id: row.get(0)?,
             name: row.get(1)?,
             description: row.get(2)?,
-            thumbnail_path: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+            creator: row.get(3)?,
+            thumbnail_path: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
             tags: vec![],
             collections: vec![],
         })
@@ -84,6 +86,10 @@ pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest
     if let Some(description) = &req.description {
         conn.execute("UPDATE projects SET description = ?1, updated_at = ?2 WHERE id = ?3",
             rusqlite::params![description, now, id]).map_err(map_err)?;
+    }
+    if let Some(creator) = &req.creator {
+        conn.execute("UPDATE projects SET creator = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![creator, now, id]).map_err(map_err)?;
     }
 
     Ok(())
@@ -149,6 +155,15 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
+    // Filter by creator
+    if let Some(creator) = &req.creator {
+        if !creator.is_empty() {
+            conditions.push(format!("p.creator = ?{}", param_idx));
+            params.push(Box::new(creator.clone()));
+            param_idx += 1;
+        }
+    }
+
     // Filter by asset types
     if let Some(asset_types) = &req.asset_types {
         if !asset_types.is_empty() {
@@ -174,7 +189,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
     };
 
     let sql = format!(
-        "SELECT p.id, p.name, p.thumbnail_path, p.created_at, p.updated_at FROM projects p WHERE {} ORDER BY {} {}",
+        "SELECT p.id, p.name, p.creator, p.thumbnail_path, p.created_at, p.updated_at FROM projects p WHERE {} ORDER BY {} {}",
         conditions.join(" AND "), sort_col, sort_dir
     );
 
@@ -185,9 +200,10 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         Ok(ProjectSummary {
             id: row.get(0)?,
             name: row.get(1)?,
-            thumbnail_path: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
+            creator: row.get(2)?,
+            thumbnail_path: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
             tags: vec![],
             asset_types: vec![],
         })
@@ -617,6 +633,18 @@ pub fn update_revision_notes(db: State<Database>, revision_id: String, notes: St
         rusqlite::params![notes, revision_id],
     ).map_err(map_err)?;
     Ok(())
+}
+
+// ── Creators ──
+
+#[tauri::command]
+pub fn list_creators(db: State<Database>) -> CmdResult<Vec<String>> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT creator FROM projects ORDER BY creator"
+    ).map_err(map_err)?;
+    let rows = stmt.query_map([], |row| row.get(0)).map_err(map_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
 }
 
 // ── Data Export ──

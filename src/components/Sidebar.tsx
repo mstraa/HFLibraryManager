@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { listTags, listCollections } from "../lib/api";
+import { listTags, listCollections, listCreators } from "../lib/api";
 import type { TagWithCount, Collection, AssetType } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
@@ -17,6 +17,8 @@ interface SidebarProps {
   onCollectionChange: (id: string | undefined) => void;
   selectedAssetTypes: string[];
   onAssetTypesChange: (types: string[]) => void;
+  selectedCreator: string | undefined;
+  onCreatorChange: (creator: string | undefined) => void;
   onCreateProject: () => void;
   refreshKey?: number;
 }
@@ -28,18 +30,22 @@ export default function Sidebar({
   onCollectionChange,
   selectedAssetTypes,
   onAssetTypesChange,
+  selectedCreator,
+  onCreatorChange,
   onCreateProject,
   refreshKey,
 }: SidebarProps) {
   const [tags, setTags] = useState<TagWithCount[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [creators, setCreators] = useState<string[]>([]);
   const [showTagManager, setShowTagManager] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
 
   const loadFilters = useCallback(async () => {
-    const [t, c] = await Promise.all([listTags(), listCollections()]);
+    const [t, c, cr] = await Promise.all([listTags(), listCollections(), listCreators()]);
     setTags(t);
     setCollections(c);
+    setCreators(cr);
   }, []);
 
   useEffect(() => {
@@ -66,12 +72,14 @@ export default function Sidebar({
     onTagsChange([]);
     onCollectionChange(undefined);
     onAssetTypesChange([]);
+    onCreatorChange(undefined);
   }
 
   const hasFilters =
     selectedTags.length > 0 ||
     selectedCollection !== undefined ||
-    selectedAssetTypes.length > 0;
+    selectedAssetTypes.length > 0 ||
+    selectedCreator !== undefined;
 
   return (
     <>
@@ -202,6 +210,43 @@ export default function Sidebar({
             ))}
           </div>
         </div>
+
+        {/* Creator */}
+        {creators.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+              Creator
+            </h3>
+            <ul className="space-y-1">
+              <li>
+                <button
+                  onClick={() => onCreatorChange(undefined)}
+                  className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
+                    selectedCreator === undefined
+                      ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
+                      : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  All Creators
+                </button>
+              </li>
+              {creators.map((cr) => (
+                <li key={cr}>
+                  <button
+                    onClick={() => onCreatorChange(cr)}
+                    className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
+                      selectedCreator === cr
+                        ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
+                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    {cr}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Clear filters */}
         {hasFilters && (

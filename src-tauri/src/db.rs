@@ -42,6 +42,7 @@ impl Database {
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
+                creator TEXT NOT NULL DEFAULT 'Me',
                 thumbnail_path TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -120,6 +121,19 @@ impl Database {
             END;
             ",
         )?;
+
+        // Migration: add creator column to projects
+        let has_creator: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = 'creator'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if !has_creator {
+            conn.execute_batch(
+                "ALTER TABLE projects ADD COLUMN creator TEXT NOT NULL DEFAULT 'Me';"
+            )?;
+        }
 
         // Migration: rename 'affinity' asset_type to 'design'
         let has_affinity: bool = conn.query_row(

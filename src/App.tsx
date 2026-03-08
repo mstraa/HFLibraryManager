@@ -18,6 +18,7 @@ function App() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
+  const [selectedCreator, setSelectedCreator] = useState<string | undefined>();
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
@@ -32,11 +33,12 @@ function App() {
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       collection_id: selectedCollection,
       asset_types: selectedAssetTypes.length > 0 ? selectedAssetTypes : undefined,
+      creator: selectedCreator,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, selectedCollection, selectedAssetTypes, sortBy, sortOrder]);
+  }, [search, selectedTags, selectedCollection, selectedAssetTypes, selectedCreator, sortBy, sortOrder]);
 
   // Reload when filters change (debounce search)
   useEffect(() => {
@@ -118,6 +120,8 @@ function App() {
         onCollectionChange={setSelectedCollection}
         selectedAssetTypes={selectedAssetTypes}
         onAssetTypesChange={setSelectedAssetTypes}
+        selectedCreator={selectedCreator}
+        onCreatorChange={setSelectedCreator}
         onCreateProject={() => setShowCreate(true)}
         refreshKey={sidebarRefreshKey}
       />

@@ -5,6 +5,7 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub creator: String,
     pub thumbnail_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -16,6 +17,7 @@ pub struct Project {
 pub struct ProjectSummary {
     pub id: String,
     pub name: String,
+    pub creator: String,
     pub thumbnail_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -88,6 +90,7 @@ pub struct CreateProjectRequest {
 pub struct UpdateProjectRequest {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub creator: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +123,7 @@ pub struct ListProjectsRequest {
     pub tag_ids: Option<Vec<String>>,
     pub collection_id: Option<String>,
     pub asset_types: Option<Vec<String>>,
+    pub creator: Option<String>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
 }

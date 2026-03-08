@@ -12,6 +12,7 @@ import {
   listCollections,
   addProjectToCollection,
   removeProjectFromCollection,
+  listCreators,
 } from "../lib/api";
 import type { Project, Asset, AssetType, TagWithCount, Collection } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
@@ -36,18 +37,21 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   const [nameInput, setNameInput] = useState("");
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [creators, setCreators] = useState<string[]>([]);
 
   const loadProject = useCallback(async () => {
-    const [p, a, t, c] = await Promise.all([
+    const [p, a, t, c, cr] = await Promise.all([
       getProject(projectId),
       getProjectAssets(projectId),
       listTags(),
       listCollections(),
+      listCreators(),
     ]);
     setProject(p);
     setAssets(a);
     setAllTags(t);
     setAllCollections(c);
+    setCreators(cr);
     setNameInput(p.name);
   }, [projectId]);
 
@@ -273,6 +277,36 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* Creator */}
+              <div className="mt-3">
+                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+                  Creator
+                </h3>
+                <input
+                  type="text"
+                  value={project.creator}
+                  onChange={async (e) => {
+                    const val = e.target.value;
+                    setProject((prev) => prev ? { ...prev, creator: val } : prev);
+                  }}
+                  onBlur={async () => {
+                    if (project.creator.trim()) {
+                      await updateProject(projectId, { creator: project.creator.trim() });
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                  list="creator-suggestions"
+                  className="w-48 text-sm px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+                <datalist id="creator-suggestions">
+                  {creators.map((cr) => (
+                    <option key={cr} value={cr} />
+                  ))}
+                </datalist>
               </div>
             </div>
           </div>

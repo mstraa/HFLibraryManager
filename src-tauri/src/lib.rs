@@ -38,6 +38,8 @@ pub fn run() {
             commands::update_tag,
             commands::delete_tag,
             commands::set_project_tags,
+            // Creators
+            commands::list_creators,
             // Collections
             commands::create_collection,
             commands::list_collections,
