@@ -5,21 +5,48 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub struct Database {
-    pub conn: Mutex<Connection>,
+    conn: Mutex<Option<Connection>>,
 }
 
 impl Database {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Self {
+        let conn = if config::is_first_launch() {
+            None
+        } else {
+            Some(Self::open_connection())
+        };
+        Self {
+            conn: Mutex::new(conn),
+        }
+    }
+
+    fn open_connection() -> Connection {
         let db_path = Self::db_path();
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent).expect("Failed to create data directory");
         }
-        let conn = Connection::open(&db_path)?;
-        let db = Self {
-            conn: Mutex::new(conn),
-        };
-        db.run_migrations()?;
-        Ok(db)
+        let conn = Connection::open(&db_path).expect("Failed to open database");
+        conn.execute_batch("PRAGMA journal_mode=WAL;").expect("WAL mode");
+        conn.execute_batch("PRAGMA foreign_keys=ON;").expect("foreign keys");
+        Self::run_migrations_on(&conn).expect("migrations");
+        conn
+    }
+
+    /// Close the current connection and open a new one for the active library.
+    /// Call this after switching the active library in config.
+    pub fn reconnect(&self) {
+        let mut guard = self.conn.lock().expect("Failed to lock database");
+        *guard = Some(Self::open_connection());
+    }
+
+    /// Lock the database and return the guard. Lazily initializes on first use.
+    /// Callers use: `let conn = db.conn(); let conn = conn.as_ref().unwrap();`
+    pub fn conn(&self) -> std::sync::MutexGuard<'_, Option<Connection>> {
+        let mut guard = self.conn.lock().expect("Failed to lock database");
+        if guard.is_none() {
+            *guard = Some(Self::open_connection());
+        }
+        guard
     }
 
     pub fn data_dir() -> PathBuf {
@@ -30,11 +57,7 @@ impl Database {
         Self::data_dir().join("db.sqlite")
     }
 
-    fn run_migrations(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
-
+    fn run_migrations_on(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS projects (

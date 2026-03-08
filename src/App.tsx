@@ -27,6 +27,15 @@ function App() {
   const [excludedFilaments, setExcludedFilaments] = useState<string[]>([]);
   const [selectedSize, setSelectedSize] = useState<string | undefined>();
   const [excludedSizes, setExcludedSizes] = useState<string[]>([]);
+  const [noFilamentFilter, _setNoFilamentFilter] = useState<"include" | "exclude" | undefined>(() => {
+    const stored = localStorage.getItem("no-filament-filter");
+    if (stored === "include" || stored === "exclude") return stored;
+    return undefined;
+  });
+  const setNoFilamentFilter = useCallback((v: "include" | "exclude" | undefined) => {
+    _setNoFilamentFilter(v);
+    localStorage.setItem("no-filament-filter", v ?? "off");
+  }, []);
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const navHistoryRef = useRef<string[]>([]); // stack of previous project IDs
@@ -50,11 +59,12 @@ function App() {
       exclude_tag_ids: excludedTags.length > 0 ? excludedTags : undefined,
       exclude_filaments: excludedFilaments.length > 0 ? excludedFilaments : undefined,
       exclude_sizes: excludedSizes.length > 0 ? excludedSizes : undefined,
+      no_filament: noFilamentFilter,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, sortBy, sortOrder]);
+  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, sortBy, sortOrder]);
 
   // Check first launch
   useEffect(() => {
@@ -70,7 +80,7 @@ function App() {
     };
   }, [loadProjects, search]);
 
-  async function handleCreate(name: string, description: string, importFolder?: string) {
+  async function handleCreate(name: string, description: string, importFolder?: string, navigateToProject = true) {
     setImporting(!!importFolder);
     try {
       const project = await createProject(name, description || undefined);
@@ -91,8 +101,8 @@ function App() {
             else if (ext === "txt") category = "txt";
             else if (DESIGN_EXTS.has(ext)) category = "design";
 
-            if (category && (!newest[category] || f.created_at > newest[category].time)) {
-              newest[category] = { id: f.id, time: f.created_at };
+            if (category && (!newest[category] || f.modified_at > newest[category].time)) {
+              newest[category] = { id: f.id, time: f.modified_at };
             }
           }
 
@@ -109,7 +119,12 @@ function App() {
         }
       }
       setShowCreate(false);
-      navigateTo(project.id);
+      if (navigateToProject) {
+        navigateTo(project.id);
+      } else {
+        loadProjects();
+        setSidebarRefreshKey((k) => k + 1);
+      }
     } finally {
       setImporting(false);
     }
@@ -206,7 +221,7 @@ function App() {
     // Take the first path — expect it to be a folder
     const folderPath = paths[0];
     const folderName = folderPath.split("/").pop() || "Untitled";
-    await handleCreate(folderName, "", folderPath);
+    await handleCreate(folderName, "", folderPath, false);
   }, [activeProjectId]);
 
   const { isDragging } = useFileDrop(handleFolderDrop);
@@ -221,7 +236,23 @@ function App() {
 
   // Settings view
   if (showSettings) {
-    return <Settings onBack={() => setShowSettings(false)} />;
+    return <Settings onBack={() => setShowSettings(false)} onLibraryChanged={() => {
+      // Reset all filters and navigation state when library changes
+      setSearch("");
+      setSelectedTags([]);
+      setExcludedTags([]);
+      setSelectedCollection(undefined);
+      setSelectedFilaments([]);
+      setExcludedFilaments([]);
+      setNoFilamentFilter(undefined);
+      setSelectedSize(undefined);
+      setExcludedSizes([]);
+      setActiveProjectId(null);
+      navHistoryRef.current = [];
+      navForwardRef.current = [];
+      setSidebarRefreshKey((k) => k + 1);
+      loadProjects();
+    }} />;
   }
 
   // Project detail view
@@ -254,6 +285,8 @@ function App() {
         onFilamentsChange={setSelectedFilaments}
         excludedFilaments={excludedFilaments}
         onExcludedFilamentsChange={setExcludedFilaments}
+        noFilamentFilter={noFilamentFilter}
+        onNoFilamentFilterChange={setNoFilamentFilter}
         selectedSize={selectedSize}
         onSizeChange={setSelectedSize}
         excludedSizes={excludedSizes}
@@ -267,6 +300,7 @@ function App() {
           setSelectedCollection(undefined);
           setSelectedFilaments([]);
           setExcludedFilaments([]);
+          setNoFilamentFilter(undefined);
           setSelectedSize(undefined);
           setExcludedSizes([]);
         }}

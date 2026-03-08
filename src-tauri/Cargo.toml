@@ -1,12 +1,12 @@
 [package]
-name = "print-manager"
+name = "HFLibraryManager"
 version = "0.1.0"
-description = "3D Print Design Manager"
-authors = ["alex"]
+description = "HF Library Manager"
+authors = ["Mstraa"]
 edition = "2021"
 
 [lib]
-name = "print_manager_lib"
+name = "hf_library_manager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -26,9 +26,5 @@ zip = "2"
 dirs = "6"
 open = "5"
 tauri-plugin-fs = "2"
-tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", optional = true }
-
-[features]
-default = []
-mcp = ["tauri-plugin-mcp"]
+tauri-plugin-mcp-bridge = "0.9"
 

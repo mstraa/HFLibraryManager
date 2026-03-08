@@ -89,6 +89,7 @@ export interface ListProjectsRequest {
   exclude_tag_ids?: string[];
   exclude_filaments?: string[];
   exclude_sizes?: string[];
+  no_filament?: "include" | "exclude";
   sort_by?: SortBy;
   sort_order?: SortOrder;
 }

@@ -62,7 +62,7 @@ export default function ProjectCard({
       <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-750 relative overflow-hidden flex items-center justify-center">
         {project.thumbnail_path ? (
           <img
-            src={convertFileSrc(project.thumbnail_path)}
+            src={convertFileSrc(project.thumbnail_path) + "?v=" + encodeURIComponent(project.updated_at)}
             alt={project.name}
             className={`group-hover:scale-105 transition-transform duration-300 ${
               thumbnailMode === "full"

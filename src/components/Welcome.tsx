@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { addLibrary, switchLibrary, initializeDefaultLibrary } from "../lib/api";
+import { setupLibrary } from "../lib/api";
 
 interface WelcomeProps {
   onComplete: () => void;
@@ -10,22 +10,15 @@ export default function Welcome({ onComplete }: WelcomeProps) {
   const [selecting, setSelecting] = useState(false);
 
   async function handleSelectFolder() {
+    const selected = await open({ directory: true, multiple: false, title: "Choose your library folder" });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
+    if (!path) return;
+
     setSelecting(true);
     try {
-      const selected = await open({ directory: true, multiple: false, title: "Choose your library folder" });
-      if (!selected) {
-        setSelecting(false);
-        return;
-      }
-      const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
-      if (!path) {
-        setSelecting(false);
-        return;
-      }
-      const name = path.split("/").pop() || "Library";
-      await addLibrary(name, path);
-      await switchLibrary(1);
-      window.location.reload();
+      await setupLibrary(path);
+      onComplete();
     } catch (err) {
       console.error("Failed to set library folder:", err);
       setSelecting(false);
@@ -35,7 +28,7 @@ export default function Welcome({ onComplete }: WelcomeProps) {
   async function handleUseDefault() {
     setSelecting(true);
     try {
-      await initializeDefaultLibrary();
+      await setupLibrary();
       onComplete();
     } catch (err) {
       console.error("Failed to initialize default library:", err);

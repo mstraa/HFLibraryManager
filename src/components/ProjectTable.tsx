@@ -135,7 +135,7 @@ export default function ProjectTable({
                   <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-750 overflow-hidden shrink-0">
                     {project.thumbnail_path ? (
                       <img
-                        src={convertFileSrc(project.thumbnail_path)}
+                        src={convertFileSrc(project.thumbnail_path) + "?v=" + encodeURIComponent(project.updated_at)}
                         alt=""
                         className="w-full h-full object-cover"
                       />

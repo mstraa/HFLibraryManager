@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    print_manager_lib::run()
+    hf_library_manager_lib::run()
 }

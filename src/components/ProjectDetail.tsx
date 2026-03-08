@@ -49,6 +49,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const [notesOpen, setNotesOpen] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [settingThumbnail, setSettingThumbnail] = useState(false);
+  const [thumbKey, setThumbKey] = useState(0);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const filesSectionRef = useRef<HTMLDivElement>(null);
   const [importingFiles, setImportingFiles] = useState(false);
@@ -124,6 +125,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
     if (!path) return;
     await setProjectThumbnail(projectId, path);
+    setThumbKey((k) => k + 1);
     loadProject();
   }
 
@@ -226,7 +228,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const filamentMap = new Map<string, FilamentInfo>();
   for (const m of favoritedMeta) {
     for (const f of m.filaments ?? []) {
-      const key = f.color.toLowerCase();
+      const key = f.color ? f.color.toLowerCase() : `${f.brand}|${f.name}`.toLowerCase();
       const existing = filamentMap.get(key);
       if (!existing || f.name.length > existing.name.length) {
         filamentMap.set(key, f);
@@ -351,7 +353,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
             >
               {project.thumbnail_path ? (
                 <img
-                  src={convertFileSrc(project.thumbnail_path)}
+                  src={convertFileSrc(project.thumbnail_path) + "?v=" + thumbKey}
                   alt={project.name}
                   className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
                 />
@@ -709,6 +711,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                 setSettingThumbnail(true);
                 try {
                   await setProjectThumbnail(projectId, filePath);
+                  setThumbKey((k) => k + 1);
                   await loadProject();
                 } finally {
                   setSettingThumbnail(false);

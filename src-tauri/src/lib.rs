@@ -8,21 +8,16 @@ use db::Database;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let database = Database::new().expect("Failed to initialize database");
+    let database = Database::new();
 
-    #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init());
 
-    #[cfg(feature = "mcp")]
+    #[cfg(debug_assertions)]
     {
-        builder = builder.plugin(tauri_plugin_mcp::init_with_config(
-            tauri_plugin_mcp::PluginConfig::new("HF Library Manager".to_string())
-                .start_socket_server(true)
-                .socket_path("/tmp/tauri-mcp.sock".into()),
-        ));
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     }
 
     builder
@@ -67,7 +62,7 @@ pub fn run() {
             commands::export_data,
             commands::get_data_dir,
             commands::is_first_launch,
-            commands::initialize_default_library,
+            commands::setup_library,
             commands::get_library_path,
             commands::set_library_path,
             commands::get_libraries,

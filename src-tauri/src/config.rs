@@ -37,7 +37,7 @@ impl Default for AppConfig {
 fn default_library_path() -> String {
     dirs::home_dir()
         .expect("Could not find home directory")
-        .join("3dPrintManager")
+        .join("HFLibraryManager")
         .to_string_lossy()
         .to_string()
 }
@@ -47,7 +47,7 @@ fn config_dir() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
         .join(".config")
-        .join("3dPrintManager")
+        .join("HFLibraryManager")
 }
 
 fn config_path() -> PathBuf {
@@ -93,6 +93,14 @@ pub fn get_config() -> AppConfig {
         std::sync::Mutex::new(load_config())
     });
     mutex.lock().unwrap().clone()
+}
+
+pub fn reload_config() {
+    let mutex = CONFIG.get_or_init(|| {
+        std::sync::Mutex::new(load_config())
+    });
+    let mut config = mutex.lock().unwrap();
+    *config = load_config();
 }
 
 fn update_config<F: FnOnce(&mut AppConfig)>(f: F) -> Result<(), String> {

@@ -66,7 +66,12 @@ pub fn generate_thumbnail(image_bytes: &[u8], dest_dir: &Path, filename: &str) -
     let (w, h) = img.dimensions();
 
     let thumb = if w > THUMB_MAX_WIDTH || h > THUMB_MAX_HEIGHT {
-        img.resize(THUMB_MAX_WIDTH, THUMB_MAX_HEIGHT, FilterType::Lanczos3)
+        if w > THUMB_MAX_WIDTH * 4 || h > THUMB_MAX_HEIGHT * 4 {
+            let pre = img.resize(THUMB_MAX_WIDTH * 2, THUMB_MAX_HEIGHT * 2, FilterType::Nearest);
+            pre.resize(THUMB_MAX_WIDTH, THUMB_MAX_HEIGHT, FilterType::Lanczos3)
+        } else {
+            img.resize(THUMB_MAX_WIDTH, THUMB_MAX_HEIGHT, FilterType::Lanczos3)
+        }
     } else {
         img
     };
@@ -80,12 +85,21 @@ pub fn generate_thumbnail(image_bytes: &[u8], dest_dir: &Path, filename: &str) -
 
 /// Generate a thumbnail from an image file on disk (for manual thumbnail setting).
 /// Copies and resizes to standard thumbnail dimensions.
+/// Uses a fast two-pass resize for large images to avoid blocking.
 pub fn generate_thumbnail_from_file(source_path: &Path, dest_dir: &Path, filename: &str) -> Option<PathBuf> {
-    let img = image::open(source_path).ok()?;
+    // Read bytes and detect format from content, not extension (handles mismatched extensions)
+    let bytes = fs::read(source_path).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?;
     let (w, h) = img.dimensions();
 
     let thumb = if w > THUMB_MAX_WIDTH || h > THUMB_MAX_HEIGHT {
-        img.resize(THUMB_MAX_WIDTH, THUMB_MAX_HEIGHT, FilterType::Lanczos3)
+        // For large images, do a fast pre-shrink then a quality pass
+        if w > THUMB_MAX_WIDTH * 4 || h > THUMB_MAX_HEIGHT * 4 {
+            let pre = img.resize(THUMB_MAX_WIDTH * 2, THUMB_MAX_HEIGHT * 2, FilterType::Nearest);
+            pre.resize(THUMB_MAX_WIDTH, THUMB_MAX_HEIGHT, FilterType::Lanczos3)
+        } else {
+            img.resize(THUMB_MAX_WIDTH, THUMB_MAX_HEIGHT, FilterType::Lanczos3)
+        }
     } else {
         img
     };

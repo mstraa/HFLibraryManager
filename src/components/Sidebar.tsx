@@ -32,6 +32,8 @@ interface SidebarProps {
   onFilamentsChange: (filaments: string[]) => void;
   excludedFilaments: string[];
   onExcludedFilamentsChange: (filaments: string[]) => void;
+  noFilamentFilter: "include" | "exclude" | undefined;
+  onNoFilamentFilterChange: (v: "include" | "exclude" | undefined) => void;
   selectedSize: string | undefined;
   onSizeChange: (size: string | undefined) => void;
   excludedSizes: string[];
@@ -52,6 +54,8 @@ export default function Sidebar({
   onFilamentsChange,
   excludedFilaments,
   onExcludedFilamentsChange,
+  noFilamentFilter,
+  onNoFilamentFilterChange,
   selectedSize,
   onSizeChange,
   excludedSizes,
@@ -127,6 +131,29 @@ export default function Sidebar({
     }
   }
 
+  function toggleNoFilament() {
+    if (noFilamentFilter === "exclude") {
+      onNoFilamentFilterChange(undefined);
+      return;
+    }
+    if (noFilamentFilter === "include") {
+      onNoFilamentFilterChange(undefined);
+    } else {
+      onNoFilamentFilterChange("include");
+    }
+  }
+
+  function excludeNoFilament() {
+    if (noFilamentFilter === "include") {
+      onNoFilamentFilterChange(undefined);
+    }
+    if (noFilamentFilter === "exclude") {
+      onNoFilamentFilterChange(undefined);
+    } else {
+      onNoFilamentFilterChange("exclude");
+    }
+  }
+
   function excludeFilament(key: string) {
     if (selectedFilaments.includes(key)) {
       onFilamentsChange(selectedFilaments.filter((k) => k !== key));
@@ -163,6 +190,7 @@ export default function Sidebar({
     onCollectionChange(undefined);
     onFilamentsChange([]);
     onExcludedFilamentsChange([]);
+    onNoFilamentFilterChange(undefined);
     onSizeChange(undefined);
     onExcludedSizesChange([]);
   }
@@ -338,6 +366,25 @@ export default function Sidebar({
             </button>
             {!collapsed.filaments && (
               <ul className="space-y-0.5">
+                <li>
+                  <button
+                    onClick={toggleNoFilament}
+                    onContextMenu={(e) => { e.preventDefault(); excludeNoFilament(); }}
+                    className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
+                      noFilamentFilter === "exclude"
+                        ? "text-gray-400 dark:text-gray-500 line-through opacity-60"
+                        : noFilamentFilter === "include"
+                          ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
+                          : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                    }`}
+                    title="Projects with no filament data — Right-click to exclude"
+                  >
+                    <span
+                      className={`w-3 h-3 rounded-full shrink-0 border border-dashed border-gray-400 dark:border-gray-500 ${noFilamentFilter === "exclude" ? "opacity-40" : ""}`}
+                    />
+                    <span className="truncate italic">No filament</span>
+                  </button>
+                </li>
                 {filaments.map((f) => {
                   const key = f.color.toLowerCase();
                   const isActive = selectedFilaments.includes(key);

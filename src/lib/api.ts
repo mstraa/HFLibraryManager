@@ -160,8 +160,8 @@ export async function isFirstLaunch(): Promise<boolean> {
   return invoke("is_first_launch");
 }
 
-export async function initializeDefaultLibrary(): Promise<void> {
-  return invoke("initialize_default_library");
+export async function setupLibrary(path?: string): Promise<void> {
+  return invoke("setup_library", { path: path ?? null });
 }
 
 export async function getLibraryPath(): Promise<string> {

@@ -28,7 +28,8 @@ fn map_err<E: std::fmt::Display>(e: E) -> String {
 
 #[tauri::command]
 pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResult<Project> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let description = req.description.unwrap_or_default();
@@ -58,7 +59,8 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
 
 #[tauri::command]
 pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
 
     let mut stmt = conn.prepare(
         "SELECT id, name, description, thumbnail_path, created_at, updated_at FROM projects WHERE id = ?1"
@@ -85,7 +87,8 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
 
 #[tauri::command]
 pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let now = Utc::now().to_rfc3339();
 
     if let Some(name) = &req.name {
@@ -101,7 +104,8 @@ pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest
 
 #[tauri::command]
 pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute("DELETE FROM projects WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
 
     // Move project folder to deleted/
@@ -121,7 +125,8 @@ pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
 
 #[tauri::command]
 pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let new_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -241,7 +246,8 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
 
 #[tauri::command]
 pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult<Vec<ProjectSummary>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
 
     let mut conditions = vec!["1=1".to_string()];
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
@@ -353,6 +359,18 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
+    // No-filament filter: projects with no filament metadata on any favorited file
+    if let Some(no_filament) = &req.no_filament {
+        let no_filament_condition = "p.id NOT IN (SELECT DISTINCT f.project_id FROM files f \
+            WHERE f.favorited = 1 AND json_extract(f.metadata, '$.filaments') IS NOT NULL \
+            AND json_array_length(json_extract(f.metadata, '$.filaments')) > 0)";
+        match no_filament.as_str() {
+            "include" => conditions.push(no_filament_condition.to_string()),
+            "exclude" => conditions.push(format!("NOT ({})", no_filament_condition)),
+            _ => {}
+        }
+    }
+
     let _ = param_idx; // suppress unused warning
 
     let sort_col = match req.sort_by.as_deref() {
@@ -405,7 +423,8 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
 
 #[tauri::command]
 pub fn create_tag(db: State<Database>, req: CreateTagRequest) -> CmdResult<Tag> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let id = Uuid::new_v4().to_string();
     let color = req.color.unwrap_or_else(|| "#6366f1".to_string());
 
@@ -419,7 +438,8 @@ pub fn create_tag(db: State<Database>, req: CreateTagRequest) -> CmdResult<Tag> 
 
 #[tauri::command]
 pub fn list_tags(db: State<Database>) -> CmdResult<Vec<TagWithCount>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let mut stmt = conn.prepare(
         "SELECT t.id, t.name, t.color, COUNT(pt.project_id) as cnt
          FROM tags t LEFT JOIN project_tags pt ON t.id = pt.tag_id
@@ -440,7 +460,8 @@ pub fn list_tags(db: State<Database>) -> CmdResult<Vec<TagWithCount>> {
 
 #[tauri::command]
 pub fn update_tag(db: State<Database>, id: String, req: UpdateTagRequest) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     if let Some(name) = &req.name {
         conn.execute("UPDATE tags SET name = ?1 WHERE id = ?2", rusqlite::params![name, id]).map_err(map_err)?;
     }
@@ -452,14 +473,16 @@ pub fn update_tag(db: State<Database>, id: String, req: UpdateTagRequest) -> Cmd
 
 #[tauri::command]
 pub fn delete_tag(db: State<Database>, id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn set_project_tags(db: State<Database>, project_id: String, tag_ids: Vec<String>) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute("DELETE FROM project_tags WHERE project_id = ?1", rusqlite::params![project_id]).map_err(map_err)?;
     for tag_id in &tag_ids {
         conn.execute(
@@ -476,7 +499,8 @@ pub fn set_project_tags(db: State<Database>, project_id: String, tag_ids: Vec<St
 
 #[tauri::command]
 pub fn create_collection(db: State<Database>, req: CreateCollectionRequest) -> CmdResult<Collection> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let description = req.description.unwrap_or_default();
@@ -496,7 +520,8 @@ pub fn create_collection(db: State<Database>, req: CreateCollectionRequest) -> C
 
 #[tauri::command]
 pub fn list_collections(db: State<Database>) -> CmdResult<Vec<Collection>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let mut stmt = conn.prepare(
         "SELECT c.id, c.name, c.description, c.cover_image_path, c.created_at, c.updated_at, COUNT(pc.project_id) as cnt
          FROM collections c LEFT JOIN project_collections pc ON c.id = pc.collection_id
@@ -520,7 +545,8 @@ pub fn list_collections(db: State<Database>) -> CmdResult<Vec<Collection>> {
 
 #[tauri::command]
 pub fn update_collection(db: State<Database>, id: String, req: UpdateCollectionRequest) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let now = Utc::now().to_rfc3339();
     if let Some(name) = &req.name {
         conn.execute("UPDATE collections SET name = ?1, updated_at = ?2 WHERE id = ?3",
@@ -535,14 +561,16 @@ pub fn update_collection(db: State<Database>, id: String, req: UpdateCollectionR
 
 #[tauri::command]
 pub fn delete_collection(db: State<Database>, id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute("DELETE FROM collections WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn add_project_to_collection(db: State<Database>, project_id: String, collection_id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute(
         "INSERT OR IGNORE INTO project_collections (project_id, collection_id) VALUES (?1, ?2)",
         rusqlite::params![project_id, collection_id],
@@ -552,7 +580,8 @@ pub fn add_project_to_collection(db: State<Database>, project_id: String, collec
 
 #[tauri::command]
 pub fn remove_project_from_collection(db: State<Database>, project_id: String, collection_id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute(
         "DELETE FROM project_collections WHERE project_id = ?1 AND collection_id = ?2",
         rusqlite::params![project_id, collection_id],
@@ -564,7 +593,8 @@ pub fn remove_project_from_collection(db: State<Database>, project_id: String, c
 
 #[tauri::command]
 pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<Vec<ProjectFile>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
 
     let mut stmt = conn.prepare(
         "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at
@@ -596,7 +626,8 @@ pub fn import_files(
     project_id: String,
     source_paths: Vec<String>,
 ) -> CmdResult<Vec<ProjectFile>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let files_dir = Database::data_dir()
         .join("projects")
         .join(&project_id)
@@ -700,7 +731,8 @@ pub fn import_files(
 
 #[tauri::command]
 pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
 
     let (file_path, project_id): (String, String) = conn.query_row(
         "SELECT file_path, project_id FROM files WHERE id = ?1",
@@ -743,7 +775,8 @@ pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
 
 #[tauri::command]
 pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     conn.execute(
         "UPDATE files SET notes = ?1 WHERE id = ?2",
         rusqlite::params![notes, file_id],
@@ -753,7 +786,8 @@ pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) ->
 
 #[tauri::command]
 pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<bool> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let (current, file_path, filename): (i32, String, String) = conn.query_row(
         "SELECT favorited, file_path, original_filename FROM files WHERE id = ?1",
         rusqlite::params![file_id],
@@ -789,6 +823,113 @@ fn parse_file_metadata(file_path: &str, filename: &str) -> FileMetadata {
     }
 }
 
+/// Extract (brand, name) from a filament description string like:
+/// "PLA BambuLab Basic Red  Transmission Distance: 4"
+/// Returns e.g. ("BambuLab Basic", "Red")
+fn parse_filament_name(s: &str) -> (String, String) {
+    // Strip everything from "Transmission Distance" onward
+    let name_part = if let Some(idx) = s.find("Transmission Distance") {
+        s[..idx].trim()
+    } else {
+        s.trim()
+    };
+
+    let parts: Vec<&str> = name_part.split_whitespace().collect();
+    // Expected format: TYPE BRAND1 BRAND2 COLOR...
+    // e.g. "PLA BambuLab Basic Red" → brand="BambuLab Basic", name="Red"
+    if parts.len() >= 4 {
+        let brand = format!("{} {}", parts[1], parts[2]);
+        let color_name = parts[3..].join(" ");
+        (brand, color_name)
+    } else if parts.len() == 3 {
+        (parts[1].to_string(), parts[2].to_string())
+    } else if parts.len() == 2 {
+        (parts[0].to_string(), parts[1].to_string())
+    } else {
+        (name_part.to_string(), name_part.to_string())
+    }
+}
+
+/// Guess a hex color from a filament color name.
+fn guess_color_hex(name: &str) -> String {
+    let lower = name.to_lowercase();
+    // Check each word in the name against known colors
+    // Order: check full name first, then individual words
+    let candidates = [
+        (&lower as &str, true),
+    ];
+    for (text, _) in &candidates {
+        let result = match *text {
+            s if s.contains("black") => "#000000",
+            s if s.contains("jade white") => "#e8e8e0",
+            s if s.contains("white") => "#ffffff",
+            s if s.contains("red") => "#cc0000",
+            s if s.contains("blue") && s.contains("light") => "#6699cc",
+            s if s.contains("blue") && s.contains("sky") => "#87ceeb",
+            s if s.contains("blue") && s.contains("navy") => "#001f3f",
+            s if s.contains("blue") && s.contains("royal") => "#4169e1",
+            s if s.contains("blue") => "#0055cc",
+            s if s.contains("green") && s.contains("light") => "#66cc66",
+            s if s.contains("green") && s.contains("dark") => "#006600",
+            s if s.contains("green") && s.contains("olive") => "#808000",
+            s if s.contains("green") => "#009933",
+            s if s.contains("yellow") => "#ffcc00",
+            s if s.contains("orange") => "#ff6600",
+            s if s.contains("purple") => "#8833aa",
+            s if s.contains("violet") => "#7733bb",
+            s if s.contains("pink") && s.contains("hot") => "#ff1493",
+            s if s.contains("pink") => "#ff69b4",
+            s if s.contains("magenta") => "#cc00cc",
+            s if s.contains("cyan") => "#00cccc",
+            s if s.contains("teal") => "#008080",
+            s if s.contains("brown") => "#8b4513",
+            s if s.contains("tan") => "#d2b48c",
+            s if s.contains("beige") => "#f5f5dc",
+            s if s.contains("cream") => "#fffdd0",
+            s if s.contains("ivory") => "#fffff0",
+            s if s.contains("gold") => "#ffd700",
+            s if s.contains("silver") => "#c0c0c0",
+            s if s.contains("gray") || s.contains("grey") => "#808080",
+            s if s.contains("charcoal") => "#333333",
+            s if s.contains("coral") => "#ff7f50",
+            s if s.contains("salmon") => "#fa8072",
+            s if s.contains("maroon") => "#800000",
+            s if s.contains("burgundy") => "#800020",
+            s if s.contains("crimson") => "#dc143c",
+            s if s.contains("scarlet") => "#ff2400",
+            s if s.contains("jade") => "#00a86b",
+            s if s.contains("mint") => "#98ff98",
+            s if s.contains("lavender") => "#b57edc",
+            s if s.contains("lilac") => "#c8a2c8",
+            s if s.contains("peach") => "#ffcba4",
+            s if s.contains("rust") => "#b7410e",
+            s if s.contains("copper") => "#b87333",
+            s if s.contains("bronze") => "#cd7f32",
+            s if s.contains("khaki") => "#c3b091",
+            s if s.contains("indigo") => "#4b0082",
+            s if s.contains("turquoise") => "#40e0d0",
+            s if s.contains("aqua") => "#00ffff",
+            s if s.contains("plum") => "#8e4585",
+            s if s.contains("olive") => "#808000",
+            s if s.contains("sand") => "#c2b280",
+            s if s.contains("lemon") => "#fff44f",
+            s if s.contains("lime") => "#32cd32",
+            s if s.contains("forest") => "#228b22",
+            s if s.contains("sky") => "#87ceeb",
+            s if s.contains("cobalt") => "#0047ab",
+            s if s.contains("sapphire") => "#0f52ba",
+            s if s.contains("ruby") => "#e0115f",
+            s if s.contains("emerald") => "#50c878",
+            s if s.contains("bamboo") => "#d4a017",
+            _ => "",
+        };
+        if !result.is_empty() {
+            return result.to_string();
+        }
+    }
+    String::new()
+}
+
 fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
     let content = match fs::read_to_string(file_path) {
         Ok(c) => c,
@@ -801,36 +942,29 @@ fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
     let mut height_mm = None;
     let mut layer_height = None;
     let mut max_thickness = None;
+    let mut in_filaments_section = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Parse filament lines: "#c00d1e PLA BambuLab Basic Red  Transmission Distance: 4"
+        // Track filaments section
+        if trimmed.starts_with("Filaments Used:") || trimmed.starts_with("Filaments:") {
+            in_filaments_section = true;
+            continue;
+        }
+        // Exit filaments section on blank line or new section
+        if in_filaments_section && (trimmed.is_empty() || trimmed.ends_with(':') || trimmed.starts_with("This print uses") || trimmed.starts_with("Swap ")) {
+            if !trimmed.starts_with("This print uses") {
+                in_filaments_section = false;
+            }
+        }
+
+        // Parse filament lines with hex: "#c00d1e PLA BambuLab Basic Red  Transmission Distance: 4"
         if trimmed.starts_with('#') && trimmed.len() > 7 {
             let hex = &trimmed[..7];
             if hex.len() == 7 && hex[1..].chars().all(|c| c.is_ascii_hexdigit()) {
                 let rest = trimmed[7..].trim();
-                // Extract name before "Transmission Distance"
-                let name_part = if let Some(idx) = rest.find("Transmission Distance") {
-                    rest[..idx].trim()
-                } else {
-                    rest
-                };
-                // Split: "PLA BambuLab Basic Red" -> brand="BambuLab Basic", name="Red"
-                let parts: Vec<&str> = name_part.split_whitespace().collect();
-                let (brand, name) = if parts.len() >= 4 {
-                    // parts[0] = material type (PLA), parts[1..n-1] = brand, parts[n-1] = color name
-                    // Heuristic: brand is typically 2 words after material type
-                    let brand = format!("{} {}", parts[1], parts[2]);
-                    let color_name = parts[3..].join(" ");
-                    (brand, color_name)
-                } else if parts.len() == 3 {
-                    (parts[1].to_string(), parts[2].to_string())
-                } else {
-                    (name_part.to_string(), name_part.to_string())
-                };
-
-                // Deduplicate
+                let (brand, name) = parse_filament_name(rest);
                 if !filaments.iter().any(|f| f.color == hex && f.name == name) {
                     filaments.push(FilamentInfo {
                         color: hex.to_string(),
@@ -838,6 +972,19 @@ fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
                         brand,
                     });
                 }
+            }
+        }
+        // Parse filament lines without hex (older format):
+        // "PLA BambuLab Basic Black Transmission Distance: 0.2"
+        else if in_filaments_section && trimmed.contains("Transmission Distance") {
+            let (brand, name) = parse_filament_name(trimmed);
+            if !name.is_empty() && !filaments.iter().any(|f| f.name == name && f.brand == brand) {
+                let color = guess_color_hex(&name);
+                filaments.push(FilamentInfo {
+                    color,
+                    name,
+                    brand,
+                });
             }
         }
 
@@ -934,7 +1081,8 @@ fn parse_hueforge_hfp(file_path: &str) -> FileMetadata {
 
 #[tauri::command]
 pub fn set_project_thumbnail(db: State<Database>, project_id: String, source_path: String) -> CmdResult<String> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
 
     let dest_dir = Database::data_dir().join("projects").join(&project_id).join("thumbnails");
     let source = Path::new(&source_path);
@@ -1018,7 +1166,8 @@ pub fn read_text_file(path: String) -> CmdResult<String> {
 
 #[tauri::command]
 pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<SyncResult> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let files_dir = Database::data_dir()
         .join("projects")
         .join(&project_id)
@@ -1122,14 +1271,20 @@ pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<
 
 #[tauri::command]
 pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let mut stmt = conn.prepare(
         "SELECT color, name, brand FROM (
             SELECT
                 json_extract(je.value, '$.color') as color,
                 json_extract(je.value, '$.name') as name,
                 json_extract(je.value, '$.brand') as brand,
-                ROW_NUMBER() OVER (PARTITION BY LOWER(json_extract(je.value, '$.color')) ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
+                ROW_NUMBER() OVER (PARTITION BY
+                    CASE WHEN COALESCE(json_extract(je.value, '$.color'), '') = ''
+                        THEN LOWER(json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name'))
+                        ELSE LOWER(json_extract(je.value, '$.color'))
+                    END
+                    ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
             FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
             WHERE files.favorited = 1
               AND json_extract(files.metadata, '$.filaments') IS NOT NULL
@@ -1150,7 +1305,8 @@ pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
 
 #[tauri::command]
 pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
     let mut stmt = conn.prepare(
         "SELECT DISTINCT
             CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
@@ -1170,7 +1326,8 @@ pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
 
 #[tauri::command]
 pub fn export_data(db: State<Database>) -> CmdResult<String> {
-    let conn = db.conn.lock().map_err(map_err)?;
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
 
     let mut projects = Vec::new();
     {
@@ -1250,13 +1407,25 @@ pub fn is_first_launch() -> bool {
 }
 
 #[tauri::command]
-pub fn initialize_default_library() -> CmdResult<()> {
-    let config = config::get_config();
-    config::save_config(&config).map_err(map_err)?;
+pub fn setup_library(db: State<Database>, path: Option<String>) -> CmdResult<()> {
+    let mut cfg = config::get_config();
+    if let Some(p) = path {
+        let name = std::path::Path::new(&p)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Library".to_string());
+        cfg.libraries = vec![config::LibraryEntry { path: p, name }];
+        cfg.active_library = 0;
+    }
+    config::save_config(&cfg).map_err(map_err)?;
+    // Force config reload so library_path() picks up the new value
+    config::reload_config();
     // Ensure the library directory exists
     let lib_path = config::library_path();
     fs::create_dir_all(lib_path.join("projects")).map_err(map_err)?;
     fs::create_dir_all(lib_path.join("deleted")).map_err(map_err)?;
+    // Initialize the database connection for the new library
+    db.reconnect();
     Ok(())
 }
 
@@ -1283,14 +1452,20 @@ pub fn add_library(name: String, path: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
-pub fn remove_library(index: usize) -> CmdResult<()> {
+pub fn remove_library(db: State<Database>, index: usize) -> CmdResult<()> {
+    let was_active = config::get_config().active_library == index;
     config::remove_library(index).map_err(map_err)?;
+    // If we removed the active library, reconnect to the new active one
+    if was_active {
+        db.reconnect();
+    }
     Ok(())
 }
 
 #[tauri::command]
-pub fn switch_library(index: usize) -> CmdResult<()> {
+pub fn switch_library(db: State<Database>, index: usize) -> CmdResult<()> {
     config::switch_library(index).map_err(map_err)?;
+    db.reconnect();
     Ok(())
 }
 
@@ -1301,7 +1476,7 @@ pub fn rename_library(index: usize, name: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
-pub fn set_library_path(path: String, move_data: bool) -> CmdResult<()> {
+pub fn set_library_path(db: State<Database>, path: String, move_data: bool) -> CmdResult<()> {
     let old_path = config::library_path();
     let new_path = std::path::PathBuf::from(&path);
 
@@ -1329,6 +1504,8 @@ pub fn set_library_path(path: String, move_data: bool) -> CmdResult<()> {
     }
 
     config::set_library_path(path)?;
+    // Reconnect to the database at the new location
+    db.reconnect();
     Ok(())
 }
 
@@ -1392,7 +1569,12 @@ fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<Fila
                 json_extract(je.value, '$.color') as color,
                 json_extract(je.value, '$.name') as name,
                 json_extract(je.value, '$.brand') as brand,
-                ROW_NUMBER() OVER (PARTITION BY LOWER(json_extract(je.value, '$.color')) ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
+                ROW_NUMBER() OVER (PARTITION BY
+                    CASE WHEN COALESCE(json_extract(je.value, '$.color'), '') = ''
+                        THEN LOWER(json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name'))
+                        ELSE LOWER(json_extract(je.value, '$.color'))
+                    END
+                    ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
             FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je
             WHERE f.project_id = ?1 AND f.favorited = 1
               AND json_extract(f.metadata, '$.filaments') IS NOT NULL

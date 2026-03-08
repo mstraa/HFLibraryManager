@@ -167,6 +167,7 @@ pub struct ListProjectsRequest {
     pub exclude_tag_ids: Option<Vec<String>>,
     pub exclude_filaments: Option<Vec<String>>,
     pub exclude_sizes: Option<Vec<String>>,
+    pub no_filament: Option<String>,  // "include" = only no-filament projects, "exclude" = hide them
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
 }

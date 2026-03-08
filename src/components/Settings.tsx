@@ -8,6 +8,7 @@ import type { ThumbnailMode } from "../lib/types";
 
 interface SettingsProps {
   onBack: () => void;
+  onLibraryChanged: () => void;
 }
 
 interface LibraryEntry {
@@ -23,7 +24,7 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
-export default function Settings({ onBack }: SettingsProps) {
+export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
   const [libraries, setLibraries] = useState<LibraryEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [editingName, setEditingName] = useState<number | null>(null);
@@ -75,17 +76,19 @@ export default function Settings({ onBack }: SettingsProps) {
   async function handleSwitch(index: number) {
     if (index === activeIndex) return;
     await switchLibrary(index);
-    window.location.reload();
+    await loadLibraries();
+    await loadSizes();
+    onLibraryChanged();
   }
 
   async function handleRemove(index: number) {
     setShowRemoveConfirm(null);
     const wasActive = index === activeIndex;
     await removeLibrary(index);
+    await loadLibraries();
     if (wasActive) {
-      window.location.reload();
-    } else {
-      await loadLibraries();
+      await loadSizes();
+      onLibraryChanged();
     }
   }
 
