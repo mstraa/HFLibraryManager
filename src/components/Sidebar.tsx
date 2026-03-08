@@ -3,6 +3,7 @@ import { listTags, listCollections, listCreators, listAllFilaments, listAllSizes
 import type { TagWithCount, Collection, FilamentInfo } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
+import { onDragMouseDown } from "../hooks/useDrag";
 
 interface SidebarProps {
   selectedTags: string[];
@@ -15,11 +16,9 @@ interface SidebarProps {
   onFilamentsChange: (filaments: string[]) => void;
   selectedSize: string | undefined;
   onSizeChange: (size: string | undefined) => void;
-  onCreateProject: () => void;
   refreshKey?: number;
   hasSearch?: boolean;
   onClearAll?: () => void;
-  onOpenSettings?: () => void;
 }
 
 export default function Sidebar({
@@ -33,11 +32,9 @@ export default function Sidebar({
   onFilamentsChange,
   selectedSize,
   onSizeChange,
-  onCreateProject,
   refreshKey,
   hasSearch,
   onClearAll,
-  onOpenSettings,
 }: SidebarProps) {
   const [tags, setTags] = useState<TagWithCount[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -88,14 +85,21 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className="w-56 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-4 pt-10 flex flex-col gap-5 overflow-y-auto">
-        <button
-          onClick={onCreateProject}
-          className="w-full py-2 px-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"
-        >
-          + New Project
-        </button>
+      <aside className="w-56 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex flex-col">
+        {/* Logo header */}
+        <div className="px-4 py-3 pt-10 border-b border-gray-200 dark:border-gray-700 shrink-0 flex items-center" onMouseDown={onDragMouseDown}>
+          <div className="flex items-center gap-2.5 h-[36px]">
+            <svg className="w-6 h-6 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+            <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              HF Library Manager
+            </span>
+          </div>
+        </div>
 
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
         {hasFilters && (
           <button
             onClick={onClearAll || clearAll}
@@ -306,21 +310,6 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Settings */}
-        <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-          <button
-            onClick={onOpenSettings}
-            className="w-full flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 cursor-pointer transition-colors px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-800"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            Settings
-          </button>
         </div>
       </aside>
 

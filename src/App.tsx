@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, exportData } from "./lib/api";
+import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite } from "./lib/api";
 import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
@@ -115,22 +115,10 @@ function App() {
     );
   }
 
-  async function handleExport() {
-    const data = await exportData();
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `3d-print-manager-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   // Keyboard shortcuts
   const keyBindings = useMemo(() => [
     { key: "n", meta: true, handler: () => setShowCreate(true) },
     { key: "f", meta: true, handler: () => searchInputRef.current?.focus() },
-    { key: "e", meta: true, shift: true, handler: handleExport },
     { key: "Escape", handler: () => {
       if (selectedProjectIds.length > 0) {
         setSelectedProjectIds([]);
@@ -193,7 +181,6 @@ function App() {
         onFilamentsChange={setSelectedFilaments}
         selectedSize={selectedSize}
         onSizeChange={setSelectedSize}
-        onCreateProject={() => setShowCreate(true)}
         refreshKey={sidebarRefreshKey}
         hasSearch={search.length > 0}
         onClearAll={() => {
@@ -204,7 +191,6 @@ function App() {
           setSelectedFilaments([]);
           setSelectedSize(undefined);
         }}
-        onOpenSettings={() => setShowSettings(true)}
       />
 
       <div className="flex-1 flex flex-col min-w-0 relative">
@@ -217,9 +203,10 @@ function App() {
           onSortOrderChange={setSortOrder}
           projectCount={projects.length}
           inputRef={searchInputRef}
-          onExport={handleExport}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          onCreateProject={() => setShowCreate(true)}
+          onOpenSettings={() => setShowSettings(true)}
         />
 
         <BulkActions

@@ -108,6 +108,18 @@ pub struct StorageSizes {
     pub deleted_size: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LibraryInfo {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LibrariesResponse {
+    pub libraries: Vec<LibraryInfo>,
+    pub active_index: usize,
+}
+
 // Request types
 
 #[derive(Debug, Deserialize)]

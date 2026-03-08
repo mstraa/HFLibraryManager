@@ -162,6 +162,26 @@ export async function setLibraryPath(path: string, moveData: boolean): Promise<v
   return invoke("set_library_path", { path, moveData });
 }
 
+export async function getLibraries(): Promise<{ libraries: { name: string; path: string }[]; active_index: number }> {
+  return invoke("get_libraries");
+}
+
+export async function addLibrary(name: string, path: string): Promise<void> {
+  return invoke("add_library", { name, path });
+}
+
+export async function removeLibrary(index: number): Promise<void> {
+  return invoke("remove_library", { index });
+}
+
+export async function switchLibrary(index: number): Promise<void> {
+  return invoke("switch_library", { index });
+}
+
+export async function renameLibrary(index: number, name: string): Promise<void> {
+  return invoke("rename_library", { index, name });
+}
+
 export async function getStorageSizes(): Promise<{ projects_size: number; deleted_size: number }> {
   return invoke("get_storage_sizes");
 }

@@ -1062,7 +1062,7 @@ pub fn get_data_dir() -> String {
     Database::data_dir().to_string_lossy().to_string()
 }
 
-// ── Library Path ──
+// ── Libraries ──
 
 #[tauri::command]
 pub fn get_library_path() -> String {
@@ -1070,14 +1070,47 @@ pub fn get_library_path() -> String {
 }
 
 #[tauri::command]
+pub fn get_libraries() -> CmdResult<LibrariesResponse> {
+    let (libraries, active) = config::get_libraries();
+    Ok(LibrariesResponse {
+        libraries: libraries.into_iter().map(|l| LibraryInfo { name: l.name, path: l.path }).collect(),
+        active_index: active,
+    })
+}
+
+#[tauri::command]
+pub fn add_library(name: String, path: String) -> CmdResult<()> {
+    let lib_path = std::path::PathBuf::from(&path);
+    fs::create_dir_all(&lib_path).map_err(map_err)?;
+    config::add_library(name, path).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_library(index: usize) -> CmdResult<()> {
+    config::remove_library(index).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn switch_library(index: usize) -> CmdResult<()> {
+    config::switch_library(index).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_library(index: usize, name: String) -> CmdResult<()> {
+    config::rename_library(index, name).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_library_path(path: String, move_data: bool) -> CmdResult<()> {
     let old_path = config::library_path();
     let new_path = std::path::PathBuf::from(&path);
 
-    // Create the new directory
     fs::create_dir_all(&new_path).map_err(map_err)?;
 
-    // Move existing data if requested
     if move_data && old_path.exists() && old_path != new_path {
         let old_projects = old_path.join("projects");
         let new_projects = new_path.join("projects");
@@ -1090,7 +1123,6 @@ pub fn set_library_path(path: String, move_data: bool) -> CmdResult<()> {
         if old_db.exists() && !new_db.exists() {
             fs::copy(&old_db, &new_db).map_err(map_err)?;
         }
-        // Also copy WAL/SHM files if they exist
         for ext in &["db.sqlite-wal", "db.sqlite-shm"] {
             let old_f = old_path.join(ext);
             let new_f = new_path.join(ext);
