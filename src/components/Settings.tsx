@@ -3,6 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getLibraryPath, setLibraryPath, getStorageSizes, emptyTrash } from "../lib/api";
 import { onDragMouseDown } from "../hooks/useDrag";
 import { useTheme, type Theme } from "../hooks/useTheme";
+import { useThumbnailMode } from "../hooks/useThumbnailMode";
+import type { ThumbnailMode } from "../lib/types";
 
 interface SettingsProps {
   onBack: () => void;
@@ -25,6 +27,7 @@ export default function Settings({ onBack }: SettingsProps) {
   const [showEmptyTrashConfirm, setShowEmptyTrashConfirm] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
   const { theme, setTheme } = useTheme();
+  const [thumbnailMode, setThumbnailMode] = useThumbnailMode();
 
   const loadSizes = useCallback(async () => {
     const sizes = await getStorageSizes();
@@ -136,6 +139,52 @@ export default function Settings({ onBack }: SettingsProps) {
                 >
                   {opt.icon}
                   {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Thumbnails */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">Thumbnails</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              How project thumbnails are displayed in the grid.
+            </p>
+            <div className="flex gap-3">
+              {([
+                { value: "cover" as ThumbnailMode, label: "Fill", description: "Fills the card, may crop" },
+                { value: "contain" as ThumbnailMode, label: "Fit", description: "Scales to fit the card" },
+                { value: "full" as ThumbnailMode, label: "Full", description: "Natural size, never scales up" },
+              ]).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setThumbnailMode(opt.value)}
+                  className={`flex-1 flex flex-col items-center gap-2 p-3 rounded-lg border transition-colors cursor-pointer ${
+                    thumbnailMode === opt.value
+                      ? "border-indigo-400 bg-indigo-50 dark:bg-indigo-900/30"
+                      : "border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {/* Preview illustration */}
+                  <div className="w-full aspect-[4/3] rounded bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
+                    {opt.value === "cover" ? (
+                      <div className="w-full h-full bg-gradient-to-br from-indigo-200 to-indigo-400 dark:from-indigo-700 dark:to-indigo-500" />
+                    ) : opt.value === "contain" ? (
+                      <div className="w-3/5 h-4/5 rounded-sm bg-gradient-to-br from-indigo-200 to-indigo-400 dark:from-indigo-700 dark:to-indigo-500" />
+                    ) : (
+                      <div className="w-2/5 h-2/5 rounded-sm bg-gradient-to-br from-indigo-200 to-indigo-400 dark:from-indigo-700 dark:to-indigo-500" />
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <div className={`text-sm font-medium ${
+                      thumbnailMode === opt.value
+                        ? "text-indigo-700 dark:text-indigo-300"
+                        : "text-gray-700 dark:text-gray-300"
+                    }`}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] text-gray-500 dark:text-gray-400">{opt.description}</div>
+                  </div>
                 </button>
               ))}
             </div>

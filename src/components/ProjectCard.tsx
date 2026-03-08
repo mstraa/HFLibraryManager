@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ProjectSummary } from "../lib/types";
+import { useThumbnailMode } from "../hooks/useThumbnailMode";
 
 
 interface ProjectCardProps {
@@ -35,6 +36,8 @@ export default function ProjectCard({
   onFilamentClick,
   onSizeClick,
 }: ProjectCardProps) {
+  const [thumbnailMode] = useThumbnailMode();
+
   function handleClick(e: React.MouseEvent) {
     if (selectionMode && onToggleSelect) {
       onToggleSelect(project.id);
@@ -56,12 +59,18 @@ export default function ProjectCard({
       }`}
     >
       {/* Thumbnail */}
-      <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-750 relative overflow-hidden">
+      <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-750 relative overflow-hidden flex items-center justify-center">
         {project.thumbnail_path ? (
           <img
             src={convertFileSrc(project.thumbnail_path)}
             alt={project.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className={`group-hover:scale-105 transition-transform duration-300 ${
+              thumbnailMode === "full"
+                ? "object-scale-down"
+                : thumbnailMode === "contain"
+                  ? "w-full h-full object-contain"
+                  : "w-full h-full object-cover"
+            }`}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
