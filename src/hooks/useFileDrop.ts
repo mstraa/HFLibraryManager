@@ -30,7 +30,8 @@ export function useFileDrop(onDrop: (paths: string[]) => void) {
         } else {
           unlisten = fn;
         }
-      });
+      })
+      .catch((err) => console.error("Failed to register drag-drop listener:", err));
 
     return () => {
       cancelled = true;

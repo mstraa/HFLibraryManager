@@ -37,15 +37,23 @@ export default function Settings({ onBack }: SettingsProps) {
   const [thumbnailMode, setThumbnailMode] = useThumbnailMode();
 
   const loadLibraries = useCallback(async () => {
-    const data = await getLibraries();
-    setLibraries(data.libraries);
-    setActiveIndex(data.active_index);
+    try {
+      const data = await getLibraries();
+      setLibraries(data.libraries);
+      setActiveIndex(data.active_index);
+    } catch (err) {
+      console.error("Failed to load libraries:", err);
+    }
   }, []);
 
   const loadSizes = useCallback(async () => {
-    const sizes = await getStorageSizes();
-    setProjectsSize(sizes.projects_size);
-    setDeletedSize(sizes.deleted_size);
+    try {
+      const sizes = await getStorageSizes();
+      setProjectsSize(sizes.projects_size);
+      setDeletedSize(sizes.deleted_size);
+    } catch (err) {
+      console.error("Failed to load storage sizes:", err);
+    }
   }, []);
 
   useEffect(() => {

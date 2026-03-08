@@ -112,6 +112,10 @@ pub fn set_library_path(new_path: String) -> Result<(), String> {
     })
 }
 
+pub fn is_first_launch() -> bool {
+    !config_path().exists()
+}
+
 pub fn library_path() -> PathBuf {
     let config = get_config();
     let idx = config.active_library.min(config.libraries.len().saturating_sub(1));

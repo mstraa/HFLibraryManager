@@ -26,7 +26,7 @@ export default function BulkActions({ selectedIds, onClear, onRefresh }: BulkAct
     Promise.all([listTags(), listCollections()]).then(([t, c]) => {
       setTags(t);
       setCollections(c);
-    });
+    }).catch((err) => console.error("Failed to load tags/collections:", err));
   }, []);
 
   async function handleBulkAddTag(tagId: string) {

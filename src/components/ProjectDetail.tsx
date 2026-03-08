@@ -17,6 +17,7 @@ import {
   removeProjectFromCollection,
   openFileWithApp,
   revealInFinder,
+  duplicateProject,
   createTag,
   createCollection,
 } from "../lib/api";
@@ -31,10 +32,11 @@ interface ProjectDetailProps {
   projectId: string;
   onBack: () => void;
   onDeleted: () => void;
+  onDuplicated?: (newId: string) => void;
   onFilterByFilaments?: (hexColors: string[]) => void;
 }
 
-export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterByFilaments }: ProjectDetailProps) {
+export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicated, onFilterByFilaments }: ProjectDetailProps) {
   const [project, setProject] = useState<Project | null>(null);
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [allTags, setAllTags] = useState<TagWithCount[]>([]);
@@ -43,6 +45,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
   const [nameInput, setNameInput] = useState("");
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [settingThumbnail, setSettingThumbnail] = useState(false);
@@ -81,9 +84,13 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
       setNameInput(project?.name ?? "");
       return;
     }
-    await updateProject(projectId, { name: nameInput.trim() });
-    setEditingName(false);
-    loadProject();
+    try {
+      await updateProject(projectId, { name: nameInput.trim() });
+      setEditingName(false);
+      loadProject();
+    } catch (err) {
+      console.error("Failed to save name:", err);
+    }
   }
 
   function handleDescriptionChange(value: string) {
@@ -93,7 +100,11 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
     // Auto-save with debounce
     if (saveTimer) clearTimeout(saveTimer);
     const timer = setTimeout(async () => {
-      await updateProject(projectId, { description: value });
+      try {
+        await updateProject(projectId, { description: value });
+      } catch (err) {
+        console.error("Failed to save description:", err);
+      }
     }, 800);
     setSaveTimer(timer);
   }
@@ -140,23 +151,30 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
   async function handleCreateTag() {
     const name = newTagName.trim();
     if (!name || !project) return;
-    const tag = await createTag(name);
-    // Auto-assign to current project
-    const currentIds = project.tags.map((t) => t.id);
-    await setProjectTags(projectId, [...currentIds, tag.id]);
-    setNewTagName("");
-    setShowNewTag(false);
-    loadProject();
+    try {
+      const tag = await createTag(name);
+      const currentIds = project.tags.map((t) => t.id);
+      await setProjectTags(projectId, [...currentIds, tag.id]);
+      setNewTagName("");
+      setShowNewTag(false);
+      loadProject();
+    } catch (err) {
+      console.error("Failed to create tag:", err);
+    }
   }
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
     if (!name || !project) return;
-    const collection = await createCollection(name);
-    await addProjectToCollection(projectId, collection.id);
-    setNewCollectionName("");
-    setShowNewCollection(false);
-    loadProject();
+    try {
+      const collection = await createCollection(name);
+      await addProjectToCollection(projectId, collection.id);
+      setNewCollectionName("");
+      setShowNewCollection(false);
+      loadProject();
+    } catch (err) {
+      console.error("Failed to create collection:", err);
+    }
   }
 
   async function handleDelete() {
@@ -297,6 +315,16 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => setShowDuplicateConfirm(true)}
+          className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          title="Duplicate project"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
         </button>
 
@@ -690,6 +718,19 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDuplicateConfirm}
+        title="Duplicate Project"
+        message={`Duplicate "${project.name}"? This will create a copy of the project with all its files.`}
+        confirmLabel="Duplicate"
+        onConfirm={async () => {
+          setShowDuplicateConfirm(false);
+          const dup = await duplicateProject(projectId);
+          onDuplicated?.(dup.id);
+        }}
+        onCancel={() => setShowDuplicateConfirm(false)}
+      />
 
       <ConfirmDialog
         open={showDeleteConfirm}

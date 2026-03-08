@@ -26,5 +26,9 @@ zip = "2"
 dirs = "6"
 open = "5"
 tauri-plugin-fs = "2"
-tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp" }
+tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", optional = true }
+
+[features]
+default = []
+mcp = ["tauri-plugin-mcp"]
 

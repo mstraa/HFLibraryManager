@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite } from "./lib/api";
+import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, isFirstLaunch } from "./lib/api";
 import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
@@ -9,11 +9,13 @@ import CreateProjectDialog from "./components/CreateProjectDialog";
 import ProjectDetail from "./components/ProjectDetail";
 import BulkActions from "./components/BulkActions";
 import Settings from "./components/Settings";
+import Welcome from "./components/Welcome";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useFileDrop } from "./hooks/useFileDrop";
 import "./App.css";
 
 function App() {
+  const [showWelcome, setShowWelcome] = useState<boolean | null>(null); // null = loading
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("updated_at");
@@ -27,6 +29,8 @@ function App() {
   const [excludedSizes, setExcludedSizes] = useState<string[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const navHistoryRef = useRef<string[]>([]); // stack of previous project IDs
+  const navForwardRef = useRef<string[]>([]); // stack of forward project IDs
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
@@ -51,6 +55,11 @@ function App() {
     });
     setProjects(result);
   }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, sortBy, sortOrder]);
+
+  // Check first launch
+  useEffect(() => {
+    isFirstLaunch().then(setShowWelcome).catch(() => setShowWelcome(false));
+  }, []);
 
   // Reload when filters change (debounce search)
   useEffect(() => {
@@ -94,23 +103,75 @@ function App() {
           if (newest["design"]) {
             const designFile = imported.find((f) => f.id === newest["design"].id);
             if (designFile) {
-              const { setProjectThumbnail } = await import("./lib/api");
               await setProjectThumbnail(project.id, designFile.file_path);
             }
           }
         }
       }
       setShowCreate(false);
-      setActiveProjectId(project.id);
+      navigateTo(project.id);
     } finally {
       setImporting(false);
     }
   }
 
+  function navigateTo(projectId: string | null) {
+    // Push current state onto history before navigating
+    navHistoryRef.current.push(activeProjectId ?? "__library__");
+    navForwardRef.current = []; // clear forward on new navigation
+    setActiveProjectId(projectId);
+    if (!projectId) {
+      setSidebarRefreshKey((k) => k + 1);
+      loadProjects();
+    }
+  }
+
+  function navigateBack() {
+    if (navHistoryRef.current.length === 0) {
+      // No history but in a project/settings — go to library
+      if (activeProjectId || showSettings) {
+        if (showSettings) { setShowSettings(false); return; }
+        navForwardRef.current.push(activeProjectId ?? "__library__");
+        setActiveProjectId(null);
+        setSidebarRefreshKey((k) => k + 1);
+        loadProjects();
+      }
+      return;
+    }
+    const prev = navHistoryRef.current.pop()!;
+    navForwardRef.current.push(activeProjectId ?? "__library__");
+    const id = prev === "__library__" ? null : prev;
+    setActiveProjectId(id);
+    if (!id) {
+      setSidebarRefreshKey((k) => k + 1);
+      loadProjects();
+    }
+  }
+
+  function navigateForward() {
+    if (navForwardRef.current.length === 0) return;
+    const next = navForwardRef.current.pop()!;
+    navHistoryRef.current.push(activeProjectId ?? "__library__");
+    const id = next === "__library__" ? null : next;
+    setActiveProjectId(id);
+    if (!id) {
+      setSidebarRefreshKey((k) => k + 1);
+      loadProjects();
+    }
+  }
+
+  // Mouse back/forward buttons (3=back, 4=forward)
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (e.button === 3) { e.preventDefault(); navigateBack(); }
+      if (e.button === 4) { e.preventDefault(); navigateForward(); }
+    }
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }); // intentionally no deps — reads mutable refs
+
   function handleBack() {
-    setActiveProjectId(null);
-    setSidebarRefreshKey((k) => k + 1);
-    loadProjects();
+    navigateTo(null);
   }
 
   function handleToggleSelect(id: string) {
@@ -150,6 +211,14 @@ function App() {
 
   const { isDragging } = useFileDrop(handleFolderDrop);
 
+  // First launch — show welcome screen
+  if (showWelcome === null) {
+    return <div className="h-screen bg-gray-900" />; // loading
+  }
+  if (showWelcome) {
+    return <Welcome onComplete={() => setShowWelcome(false)} />;
+  }
+
   // Settings view
   if (showSettings) {
     return <Settings onBack={() => setShowSettings(false)} />;
@@ -162,10 +231,10 @@ function App() {
         projectId={activeProjectId}
         onBack={handleBack}
         onDeleted={handleBack}
+        onDuplicated={(newId) => navigateTo(newId)}
         onFilterByFilaments={(hexColors) => {
           setSelectedFilaments(hexColors);
-          setActiveProjectId(null);
-          setSidebarRefreshKey((k) => k + 1);
+          navigateTo(null);
         }}
       />
     );
@@ -231,7 +300,7 @@ function App() {
         {viewMode === "grid" ? (
           <ProjectGrid
             projects={projects}
-            onProjectClick={setActiveProjectId}
+            onProjectClick={navigateTo}
             selectedIds={selectedProjectIds}
             onToggleSelect={handleToggleSelect}
             onFilamentClick={(hex) => setSelectedFilaments((prev) =>
@@ -242,7 +311,7 @@ function App() {
         ) : (
           <ProjectTable
             projects={projects}
-            onProjectClick={setActiveProjectId}
+            onProjectClick={navigateTo}
             selectedIds={selectedProjectIds}
             onToggleSelect={handleToggleSelect}
             onFilamentClick={(hex) => setSelectedFilaments((prev) =>

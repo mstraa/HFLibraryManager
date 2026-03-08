@@ -10,15 +10,16 @@ use db::Database;
 pub fn run() {
     let database = Database::new().expect("Failed to initialize database");
 
+    #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init());
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "mcp")]
     {
         builder = builder.plugin(tauri_plugin_mcp::init_with_config(
-            tauri_plugin_mcp::PluginConfig::new("3D Print Manager".to_string())
+            tauri_plugin_mcp::PluginConfig::new("HF Library Manager".to_string())
                 .start_socket_server(true)
                 .socket_path("/tmp/tauri-mcp.sock".into()),
         ));
@@ -32,6 +33,7 @@ pub fn run() {
             commands::get_project,
             commands::update_project,
             commands::delete_project,
+            commands::duplicate_project,
             commands::list_projects,
             commands::set_project_thumbnail,
             // Tags
@@ -64,6 +66,8 @@ pub fn run() {
             commands::sync_project_files,
             commands::export_data,
             commands::get_data_dir,
+            commands::is_first_launch,
+            commands::initialize_default_library,
             commands::get_library_path,
             commands::set_library_path,
             commands::get_libraries,

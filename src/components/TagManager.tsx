@@ -67,33 +67,35 @@ export default function TagManager({ open, onClose, tags, onRefresh }: TagManage
         </div>
 
         {/* Create new tag */}
-        <form onSubmit={handleCreate} className="flex gap-2 mb-4">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="New tag name..."
-            className="flex-1 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-900 dark:text-gray-100"
-          />
-          <div className="flex gap-1 items-center">
+        <form onSubmit={handleCreate} className="mb-4 space-y-2">
+          <div className="flex gap-2">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="New tag name..."
+              className="flex-1 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-900 dark:text-gray-100"
+            />
+            <button
+              type="submit"
+              disabled={!newName.trim()}
+              className="px-3 py-1.5 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-lg cursor-pointer"
+            >
+              Add
+            </button>
+          </div>
+          <div className="flex gap-1.5 items-center justify-center mt-4">
             {PRESET_COLORS.map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => setNewColor(c)}
                 className={`w-5 h-5 rounded-full cursor-pointer transition-transform ${
-                  newColor === c ? "scale-125 ring-2 ring-offset-1 ring-gray-400" : "hover:scale-110"
+                  newColor === c ? "scale-125 ring-2 ring-offset-1 ring-gray-400 dark:ring-offset-gray-800" : "hover:scale-110"
                 }`}
                 style={{ backgroundColor: c }}
               />
             ))}
           </div>
-          <button
-            type="submit"
-            disabled={!newName.trim()}
-            className="px-3 py-1.5 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-lg cursor-pointer"
-          >
-            Add
-          </button>
         </form>
 
         {/* Existing tags */}

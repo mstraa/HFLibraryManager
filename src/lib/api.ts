@@ -28,6 +28,10 @@ export async function deleteProject(id: string): Promise<void> {
   return invoke("delete_project", { id });
 }
 
+export async function duplicateProject(id: string): Promise<Project> {
+  return invoke("duplicate_project", { id });
+}
+
 export async function listProjects(filters: ListProjectsRequest = {}): Promise<ProjectSummary[]> {
   return invoke("list_projects", { req: filters });
 }
@@ -151,6 +155,14 @@ export async function getDataDir(): Promise<string> {
 }
 
 // ── Library Path ──
+
+export async function isFirstLaunch(): Promise<boolean> {
+  return invoke("is_first_launch");
+}
+
+export async function initializeDefaultLibrary(): Promise<void> {
+  return invoke("initialize_default_library");
+}
 
 export async function getLibraryPath(): Promise<string> {
   return invoke("get_library_path");

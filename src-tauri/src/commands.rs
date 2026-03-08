@@ -120,6 +120,126 @@ pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    let new_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    // Get source project
+    let (name, description): (String, String) = conn.query_row(
+        "SELECT name, description FROM projects WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(map_err)?;
+
+    let new_name = format!("{} (Copy)", name);
+
+    // Create new project
+    conn.execute(
+        "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![new_id, new_name, description, now, now],
+    ).map_err(map_err)?;
+
+    // Create project directories
+    let new_project_dir = Database::data_dir().join("projects").join(&new_id);
+    let new_files_dir = new_project_dir.join("files");
+    let new_thumb_dir = new_project_dir.join("thumbnails");
+    fs::create_dir_all(&new_files_dir).map_err(map_err)?;
+    fs::create_dir_all(&new_thumb_dir).map_err(map_err)?;
+
+    // Copy files
+    let mut stmt = conn.prepare(
+        "SELECT id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at FROM files WHERE project_id = ?1"
+    ).map_err(map_err)?;
+    let files: Vec<(String, String, String, i64, String, Option<String>, bool, String, String, String)> = stmt.query_map(
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
+    ).map_err(map_err)?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    for (_old_file_id, file_path, filename, file_size, notes, thumb_path, favorited, metadata, created_at, modified_at) in &files {
+        let new_file_id = Uuid::new_v4().to_string();
+        let src = Path::new(file_path);
+        let dest = new_files_dir.join(filename);
+
+        // Copy file on disk
+        if src.exists() {
+            fs::copy(src, &dest).ok();
+        }
+
+        // Copy thumbnail if exists
+        let new_thumb = if let Some(tp) = thumb_path {
+            let src_thumb = Path::new(tp);
+            if src_thumb.exists() {
+                let thumb_name = format!("file_{}.png", new_file_id);
+                let dest_thumb = new_thumb_dir.join(&thumb_name);
+                fs::copy(src_thumb, &dest_thumb).ok();
+                Some(dest_thumb.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        conn.execute(
+            "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![new_file_id, new_id, dest.to_string_lossy().to_string(), filename, file_size, notes, new_thumb, favorited, metadata, created_at, modified_at],
+        ).map_err(map_err)?;
+    }
+
+    // Copy project thumbnail
+    let src_cover = Database::data_dir().join("projects").join(&id).join("thumbnails").join("cover.png");
+    let src_cover_svg = Database::data_dir().join("projects").join(&id).join("thumbnails").join("cover.svg");
+    let new_thumb_path = if src_cover.exists() {
+        let dest = new_thumb_dir.join("cover.png");
+        fs::copy(&src_cover, &dest).ok();
+        Some(dest.to_string_lossy().to_string())
+    } else if src_cover_svg.exists() {
+        let dest = new_thumb_dir.join("cover.svg");
+        fs::copy(&src_cover_svg, &dest).ok();
+        Some(dest.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    if let Some(ref tp) = new_thumb_path {
+        conn.execute(
+            "UPDATE projects SET thumbnail_path = ?1 WHERE id = ?2",
+            rusqlite::params![tp, new_id],
+        ).map_err(map_err)?;
+    }
+
+    // Copy tags
+    conn.execute(
+        "INSERT INTO project_tags (project_id, tag_id) SELECT ?1, tag_id FROM project_tags WHERE project_id = ?2",
+        rusqlite::params![new_id, id],
+    ).map_err(map_err)?;
+
+    // Copy collections
+    conn.execute(
+        "INSERT INTO project_collections (project_id, collection_id) SELECT ?1, collection_id FROM project_collections WHERE project_id = ?2",
+        rusqlite::params![new_id, id],
+    ).map_err(map_err)?;
+
+    let tags = get_project_tags(&conn, &new_id).map_err(map_err)?;
+    let collections = get_project_collections(&conn, &new_id).map_err(map_err)?;
+
+    Ok(Project {
+        id: new_id,
+        name: new_name,
+        description,
+        thumbnail_path: new_thumb_path,
+        created_at: now.clone(),
+        updated_at: now,
+        tags,
+        collections,
+    })
+}
+
+#[tauri::command]
 pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult<Vec<ProjectSummary>> {
     let conn = db.conn.lock().map_err(map_err)?;
 
@@ -1123,6 +1243,22 @@ pub fn get_data_dir() -> String {
 }
 
 // ── Libraries ──
+
+#[tauri::command]
+pub fn is_first_launch() -> bool {
+    config::is_first_launch()
+}
+
+#[tauri::command]
+pub fn initialize_default_library() -> CmdResult<()> {
+    let config = config::get_config();
+    config::save_config(&config).map_err(map_err)?;
+    // Ensure the library directory exists
+    let lib_path = config::library_path();
+    fs::create_dir_all(lib_path.join("projects")).map_err(map_err)?;
+    fs::create_dir_all(lib_path.join("deleted")).map_err(map_err)?;
+    Ok(())
+}
 
 #[tauri::command]
 pub fn get_library_path() -> String {

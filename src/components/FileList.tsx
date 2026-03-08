@@ -71,9 +71,11 @@ function PreviewPanel({ file, onClose }: { file: ProjectFile; onClose: () => voi
   const [textContent, setTextContent] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  if (isText && textContent === null) {
-    readTextFile(file.file_path).then(setTextContent);
-  }
+  useEffect(() => {
+    if (isText && textContent === null) {
+      readTextFile(file.file_path).then(setTextContent).catch(() => setTextContent("(Failed to load file)"));
+    }
+  }, [file.file_path, isText, textContent]);
 
   async function handleCopy() {
     if (textContent) {
