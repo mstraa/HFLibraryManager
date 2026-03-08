@@ -9,6 +9,7 @@ import {
   revealInFinder,
   readTextFile,
   syncProjectFiles,
+  openFileWithApp,
 } from "../lib/api";
 import type { ProjectFile } from "../lib/types";
 
@@ -218,9 +219,47 @@ function FileRow({
         ) : null}
       </div>
 
+      {/* Open in app buttons */}
+      {PRINT_EXTS.has(ext) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); openFileWithApp(file.file_path, "BambuStudio"); }}
+          className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer transition-colors"
+          title="Open in Bambu Studio"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          Bambu Studio
+        </button>
+      )}
+      {(ext === "af" || ext === "afdesign" || ext === "afphoto" || ext === "afpub") && (
+        <button
+          onClick={(e) => { e.stopPropagation(); openFileWithApp(file.file_path, "Affinity Designer 2"); }}
+          className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 cursor-pointer transition-colors"
+          title="Open in Affinity Designer"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          Affinity
+        </button>
+      )}
+      {ext === "hfp" && (
+        <button
+          onClick={(e) => { e.stopPropagation(); openFileWithApp(file.file_path, "HueForge"); }}
+          className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/40 cursor-pointer transition-colors"
+          title="Open in HueForge"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          HueForge
+        </button>
+      )}
+
       {/* Actions */}
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-        {!canPreview && (
+        {!canPreview && !PRINT_EXTS.has(ext) && ext !== "hfp" && ext !== "af" && ext !== "afdesign" && ext !== "afphoto" && ext !== "afpub" && (
           <span className="text-[9px] text-gray-400 dark:text-gray-500 mr-1">Finder</span>
         )}
         {onSetThumbnail && (

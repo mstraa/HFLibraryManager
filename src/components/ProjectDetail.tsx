@@ -15,6 +15,7 @@ import {
   listCollections,
   addProjectToCollection,
   removeProjectFromCollection,
+  openFileWithApp,
 } from "../lib/api";
 import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, FilamentInfo } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
@@ -369,6 +370,54 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
 
             </div>
           </div>
+
+          {/* Quick Open buttons for single starred files */}
+          {(() => {
+            const starred = files.filter(f => f.favorited);
+            const AFFINITY_EXTS = new Set(["af", "afdesign", "afphoto", "afpub"]);
+            const getExt = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
+            const hfpFiles = starred.filter(f => getExt(f.original_filename) === "hfp");
+            const afFiles = starred.filter(f => AFFINITY_EXTS.has(getExt(f.original_filename)));
+            const threemfFiles = starred.filter(f => getExt(f.original_filename) === "3mf");
+            if (hfpFiles.length !== 1 && afFiles.length !== 1 && threemfFiles.length !== 1) return null;
+            return (
+              <div className="flex flex-wrap gap-2">
+                {hfpFiles.length === 1 && (
+                  <button
+                    onClick={() => openFileWithApp(hfpFiles[0].file_path, "HueForge")}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/40 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Open in HueForge
+                  </button>
+                )}
+                {afFiles.length === 1 && (
+                  <button
+                    onClick={() => openFileWithApp(afFiles[0].file_path, "Affinity Designer 2")}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Open in Affinity
+                  </button>
+                )}
+                {threemfFiles.length === 1 && (
+                  <button
+                    onClick={() => openFileWithApp(threemfFiles[0].file_path, "BambuStudio")}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Open in Bambu Studio
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           {/* HueForge Info */}
           {(allFilaments.length > 0 || dimsSource) && (

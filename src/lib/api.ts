@@ -124,6 +124,10 @@ export async function openFileInDefaultApp(path: string): Promise<void> {
   return invoke("open_file_in_default_app", { path });
 }
 
+export async function openFileWithApp(path: string, app: string): Promise<void> {
+  return invoke("open_file_with_app", { path, app });
+}
+
 export async function revealInFinder(path: string): Promise<void> {
   return invoke("reveal_in_finder", { path });
 }

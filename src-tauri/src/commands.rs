@@ -821,6 +821,17 @@ pub fn open_file_in_default_app(path: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
+pub fn open_file_with_app(path: String, app: String) -> CmdResult<()> {
+    std::process::Command::new("open")
+        .arg("-a")
+        .arg(&app)
+        .arg(&path)
+        .spawn()
+        .map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn reveal_in_finder(path: String) -> CmdResult<()> {
     let p = Path::new(&path);
     let folder = if p.is_file() { p.parent().unwrap_or(p) } else { p };

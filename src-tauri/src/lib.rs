@@ -58,6 +58,7 @@ pub fn run() {
             commands::update_file_notes,
             commands::toggle_file_favorite,
             commands::open_file_in_default_app,
+            commands::open_file_with_app,
             commands::reveal_in_finder,
             commands::read_text_file,
             commands::sync_project_files,
