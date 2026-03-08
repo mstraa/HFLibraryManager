@@ -24,12 +24,18 @@ function saveCollapsed(state: Record<SectionKey, boolean>) {
 interface SidebarProps {
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
+  excludedTags: string[];
+  onExcludedTagsChange: (tags: string[]) => void;
   selectedCollection: string | undefined;
   onCollectionChange: (id: string | undefined) => void;
   selectedFilaments: string[];
   onFilamentsChange: (filaments: string[]) => void;
+  excludedFilaments: string[];
+  onExcludedFilamentsChange: (filaments: string[]) => void;
   selectedSize: string | undefined;
   onSizeChange: (size: string | undefined) => void;
+  excludedSizes: string[];
+  onExcludedSizesChange: (sizes: string[]) => void;
   refreshKey?: number;
   hasSearch?: boolean;
   onClearAll?: () => void;
@@ -38,12 +44,18 @@ interface SidebarProps {
 export default function Sidebar({
   selectedTags,
   onTagsChange,
+  excludedTags,
+  onExcludedTagsChange,
   selectedCollection,
   onCollectionChange,
   selectedFilaments,
   onFilamentsChange,
+  excludedFilaments,
+  onExcludedFilamentsChange,
   selectedSize,
   onSizeChange,
+  excludedSizes,
+  onExcludedSizesChange,
   refreshKey,
   hasSearch,
   onClearAll,
@@ -79,6 +91,11 @@ export default function Sidebar({
   }, [loadFilters, refreshKey]);
 
   function toggleTag(id: string) {
+    // If excluded, remove exclusion first
+    if (excludedTags.includes(id)) {
+      onExcludedTagsChange(excludedTags.filter((t) => t !== id));
+      return;
+    }
     if (selectedTags.includes(id)) {
       onTagsChange(selectedTags.filter((t) => t !== id));
     } else {
@@ -86,19 +103,79 @@ export default function Sidebar({
     }
   }
 
+  function excludeTag(id: string) {
+    // If selected, remove selection first
+    if (selectedTags.includes(id)) {
+      onTagsChange(selectedTags.filter((t) => t !== id));
+    }
+    if (excludedTags.includes(id)) {
+      onExcludedTagsChange(excludedTags.filter((t) => t !== id));
+    } else {
+      onExcludedTagsChange([...excludedTags, id]);
+    }
+  }
+
+  function toggleFilament(key: string) {
+    if (excludedFilaments.includes(key)) {
+      onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== key));
+      return;
+    }
+    if (selectedFilaments.includes(key)) {
+      onFilamentsChange(selectedFilaments.filter((k) => k !== key));
+    } else {
+      onFilamentsChange([...selectedFilaments, key]);
+    }
+  }
+
+  function excludeFilament(key: string) {
+    if (selectedFilaments.includes(key)) {
+      onFilamentsChange(selectedFilaments.filter((k) => k !== key));
+    }
+    if (excludedFilaments.includes(key)) {
+      onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== key));
+    } else {
+      onExcludedFilamentsChange([...excludedFilaments, key]);
+    }
+  }
+
+  function toggleSize(s: string) {
+    if (excludedSizes.includes(s)) {
+      onExcludedSizesChange(excludedSizes.filter((x) => x !== s));
+      return;
+    }
+    onSizeChange(selectedSize === s ? undefined : s);
+  }
+
+  function excludeSize(s: string) {
+    if (selectedSize === s) {
+      onSizeChange(undefined);
+    }
+    if (excludedSizes.includes(s)) {
+      onExcludedSizesChange(excludedSizes.filter((x) => x !== s));
+    } else {
+      onExcludedSizesChange([...excludedSizes, s]);
+    }
+  }
+
   function clearAll() {
     onTagsChange([]);
+    onExcludedTagsChange([]);
     onCollectionChange(undefined);
     onFilamentsChange([]);
+    onExcludedFilamentsChange([]);
     onSizeChange(undefined);
+    onExcludedSizesChange([]);
   }
 
   const hasFilters =
     hasSearch ||
     selectedTags.length > 0 ||
+    excludedTags.length > 0 ||
     selectedCollection !== undefined ||
     selectedFilaments.length > 0 ||
-    selectedSize !== undefined;
+    excludedFilaments.length > 0 ||
+    selectedSize !== undefined ||
+    excludedSizes.length > 0;
 
   return (
     <>
@@ -215,25 +292,31 @@ export default function Sidebar({
               </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {tags.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => toggleTag(t.id)}
-                    className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
-                      selectedTags.includes(t.id)
-                        ? "ring-2 ring-offset-1 ring-indigo-400"
-                        : "opacity-70 hover:opacity-100"
-                    }`}
-                    style={{
-                      backgroundColor: t.color + "22",
-                      borderColor: t.color,
-                      color: t.color,
-                    }}
-                  >
-                    {t.name}
-                    <span className="ml-0.5 opacity-60">{t.project_count}</span>
-                  </button>
-                ))}
+                {tags.map((t) => {
+                  const isExcluded = excludedTags.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => toggleTag(t.id)}
+                      onContextMenu={(e) => { e.preventDefault(); excludeTag(t.id); }}
+                      className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
+                        isExcluded
+                          ? "line-through !text-gray-400 dark:!text-gray-500 !bg-gray-100 dark:!bg-gray-800 !border-gray-300 dark:!border-gray-600 opacity-60"
+                          : selectedTags.includes(t.id)
+                            ? "ring-2 ring-offset-1 ring-indigo-400"
+                            : "opacity-70 hover:opacity-100"
+                      }`}
+                      style={isExcluded ? {} : {
+                        backgroundColor: t.color + "22",
+                        borderColor: t.color,
+                        color: t.color,
+                      }}
+                    >
+                      {t.name}
+                      <span className="ml-0.5 opacity-60">{t.project_count}</span>
+                    </button>
+                  );
+                })}
               </div>
             )
           )}
@@ -258,25 +341,23 @@ export default function Sidebar({
                 {filaments.map((f) => {
                   const key = f.color.toLowerCase();
                   const isActive = selectedFilaments.includes(key);
+                  const isExcluded = excludedFilaments.includes(key);
                   return (
                     <li key={key}>
                       <button
-                        onClick={() => {
-                          if (isActive) {
-                            onFilamentsChange(selectedFilaments.filter((k) => k !== key));
-                          } else {
-                            onFilamentsChange([...selectedFilaments, key]);
-                          }
-                        }}
+                        onClick={() => toggleFilament(key)}
+                        onContextMenu={(e) => { e.preventDefault(); excludeFilament(key); }}
                         className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
-                          isActive
-                            ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
-                            : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                          isExcluded
+                            ? "text-gray-400 dark:text-gray-500 line-through opacity-60"
+                            : isActive
+                              ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
+                              : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
                         }`}
-                        title={`${f.brand} ${f.name} (${f.color})`}
+                        title={`${f.brand} ${f.name} (${f.color}) — Right-click to exclude`}
                       >
                         <span
-                          className="w-3 h-3 rounded-full shrink-0 border border-gray-300 dark:border-gray-500"
+                          className={`w-3 h-3 rounded-full shrink-0 border border-gray-300 dark:border-gray-500 ${isExcluded ? "opacity-40" : ""}`}
                           style={{ backgroundColor: f.color }}
                         />
                         <span className="truncate">{f.brand} {f.name}</span>
@@ -307,14 +388,18 @@ export default function Sidebar({
               <div className="flex flex-wrap gap-1.5">
                 {sizes.map((s) => {
                   const isActive = selectedSize === s;
+                  const isExcluded = excludedSizes.includes(s);
                   return (
                     <button
                       key={s}
-                      onClick={() => onSizeChange(isActive ? undefined : s)}
+                      onClick={() => toggleSize(s)}
+                      onContextMenu={(e) => { e.preventDefault(); excludeSize(s); }}
                       className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border border-gray-300 dark:border-gray-600 ${
-                        isActive
-                          ? "ring-2 ring-offset-1 ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
-                          : "text-gray-600 dark:text-gray-400 opacity-70 hover:opacity-100"
+                        isExcluded
+                          ? "line-through text-gray-400 dark:text-gray-500 opacity-60"
+                          : isActive
+                            ? "ring-2 ring-offset-1 ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
+                            : "text-gray-600 dark:text-gray-400 opacity-70 hover:opacity-100"
                       }`}
                     >
                       {s}

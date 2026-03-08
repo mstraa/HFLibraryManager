@@ -193,6 +193,46 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
+    // Exclude tags (NOT IN — project must NOT have any of the excluded tags)
+    if let Some(exclude_tag_ids) = &req.exclude_tag_ids {
+        for tag_id in exclude_tag_ids {
+            conditions.push(format!(
+                "p.id NOT IN (SELECT project_id FROM project_tags WHERE tag_id = ?{})",
+                param_idx
+            ));
+            params.push(Box::new(tag_id.clone()));
+            param_idx += 1;
+        }
+    }
+
+    // Exclude filaments
+    if let Some(exclude_filaments) = &req.exclude_filaments {
+        for filament in exclude_filaments {
+            conditions.push(format!(
+                "p.id NOT IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
+                 WHERE f.favorited = 1 AND LOWER(json_extract(je.value, '$.color')) = ?{})",
+                param_idx
+            ));
+            params.push(Box::new(filament.to_lowercase()));
+            param_idx += 1;
+        }
+    }
+
+    // Exclude sizes
+    if let Some(exclude_sizes) = &req.exclude_sizes {
+        for size in exclude_sizes {
+            conditions.push(format!(
+                "p.id NOT IN (SELECT f.project_id FROM files f \
+                 WHERE f.favorited = 1 \
+                 AND CAST(ROUND(json_extract(f.metadata, '$.width_mm')) AS INTEGER) || 'x' || \
+                     CAST(ROUND(json_extract(f.metadata, '$.height_mm')) AS INTEGER) || 'mm' = ?{})",
+                param_idx
+            ));
+            params.push(Box::new(size.clone()));
+            param_idx += 1;
+        }
+    }
+
     let _ = param_idx; // suppress unused warning
 
     let sort_col = match req.sort_by.as_deref() {

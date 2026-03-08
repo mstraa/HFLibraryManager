@@ -86,6 +86,9 @@ export interface ListProjectsRequest {
   collection_id?: string;
   filaments?: string[];
   size?: string;
+  exclude_tag_ids?: string[];
+  exclude_filaments?: string[];
+  exclude_sizes?: string[];
   sort_by?: SortBy;
   sort_order?: SortOrder;
 }

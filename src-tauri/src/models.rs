@@ -164,6 +164,9 @@ pub struct ListProjectsRequest {
     pub collection_id: Option<String>,
     pub filaments: Option<Vec<String>>,
     pub size: Option<String>,
+    pub exclude_tag_ids: Option<Vec<String>>,
+    pub exclude_filaments: Option<Vec<String>>,
+    pub exclude_sizes: Option<Vec<String>>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
 }

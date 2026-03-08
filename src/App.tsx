@@ -19,9 +19,12 @@ function App() {
   const [sortBy, setSortBy] = useState<SortBy>("updated_at");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [excludedTags, setExcludedTags] = useState<string[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
   const [selectedFilaments, setSelectedFilaments] = useState<string[]>([]);
+  const [excludedFilaments, setExcludedFilaments] = useState<string[]>([]);
   const [selectedSize, setSelectedSize] = useState<string | undefined>();
+  const [excludedSizes, setExcludedSizes] = useState<string[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
@@ -40,11 +43,14 @@ function App() {
       collection_id: selectedCollection,
       filaments: selectedFilaments.length > 0 ? selectedFilaments : undefined,
       size: selectedSize,
+      exclude_tag_ids: excludedTags.length > 0 ? excludedTags : undefined,
+      exclude_filaments: excludedFilaments.length > 0 ? excludedFilaments : undefined,
+      exclude_sizes: excludedSizes.length > 0 ? excludedSizes : undefined,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, selectedCollection, selectedFilaments, selectedSize, sortBy, sortOrder]);
+  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, sortBy, sortOrder]);
 
   // Reload when filters change (debounce search)
   useEffect(() => {
@@ -171,20 +177,29 @@ function App() {
       <Sidebar
         selectedTags={selectedTags}
         onTagsChange={setSelectedTags}
+        excludedTags={excludedTags}
+        onExcludedTagsChange={setExcludedTags}
         selectedCollection={selectedCollection}
         onCollectionChange={setSelectedCollection}
         selectedFilaments={selectedFilaments}
         onFilamentsChange={setSelectedFilaments}
+        excludedFilaments={excludedFilaments}
+        onExcludedFilamentsChange={setExcludedFilaments}
         selectedSize={selectedSize}
         onSizeChange={setSelectedSize}
+        excludedSizes={excludedSizes}
+        onExcludedSizesChange={setExcludedSizes}
         refreshKey={sidebarRefreshKey}
         hasSearch={search.length > 0}
         onClearAll={() => {
           setSearch("");
           setSelectedTags([]);
+          setExcludedTags([]);
           setSelectedCollection(undefined);
           setSelectedFilaments([]);
+          setExcludedFilaments([]);
           setSelectedSize(undefined);
+          setExcludedSizes([]);
         }}
       />
 
