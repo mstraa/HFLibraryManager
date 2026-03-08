@@ -15,7 +15,6 @@ import {
   listCollections,
   addProjectToCollection,
   removeProjectFromCollection,
-  listCreators,
 } from "../lib/api";
 import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, FilamentInfo } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
@@ -40,7 +39,6 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
   const [nameInput, setNameInput] = useState("");
   const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [creators, setCreators] = useState<string[]>([]);
   const [notesOpen, setNotesOpen] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [settingThumbnail, setSettingThumbnail] = useState(false);
@@ -52,18 +50,16 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
     if (sync) {
       await syncProjectFiles(projectId);
     }
-    const [p, f, t, c, cr] = await Promise.all([
+    const [p, f, t, c] = await Promise.all([
       getProject(projectId),
       getProjectFiles(projectId),
       listTags(),
       listCollections(),
-      listCreators(),
     ]);
     setProject(p);
     setFiles(f);
     setAllTags(t);
     setAllCollections(c);
-    setCreators(cr);
     setNameInput(p.name);
   }, [projectId]);
 
@@ -371,35 +367,6 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
                 </div>
               </div>
 
-              {/* Creator */}
-              <div className="mt-3">
-                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
-                  Creator
-                </h3>
-                <input
-                  type="text"
-                  value={project.creator}
-                  onChange={async (e) => {
-                    const val = e.target.value;
-                    setProject((prev) => prev ? { ...prev, creator: val } : prev);
-                  }}
-                  onBlur={async () => {
-                    if (project.creator.trim()) {
-                      await updateProject(projectId, { creator: project.creator.trim() });
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  }}
-                  list="creator-suggestions"
-                  className="w-48 text-sm px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-                <datalist id="creator-suggestions">
-                  {creators.map((cr) => (
-                    <option key={cr} value={cr} />
-                  ))}
-                </datalist>
-              </div>
             </div>
           </div>
 

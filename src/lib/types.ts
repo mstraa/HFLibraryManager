@@ -2,7 +2,6 @@ export interface Project {
   id: string;
   name: string;
   description: string;
-  creator: string;
   thumbnail_path: string | null;
   created_at: string;
   updated_at: string;
@@ -13,7 +12,6 @@ export interface Project {
 export interface ProjectSummary {
   id: string;
   name: string;
-  creator: string;
   thumbnail_path: string | null;
   created_at: string;
   updated_at: string;
@@ -85,7 +83,6 @@ export interface ListProjectsRequest {
   search?: string;
   tag_ids?: string[];
   collection_id?: string;
-  creator?: string;
   filaments?: string[];
   size?: string;
   sort_by?: SortBy;

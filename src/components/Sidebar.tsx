@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { listTags, listCollections, listCreators, listAllFilaments, listAllSizes } from "../lib/api";
+import { listTags, listCollections, listAllFilaments, listAllSizes } from "../lib/api";
 import type { TagWithCount, Collection, FilamentInfo } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
@@ -10,8 +10,6 @@ interface SidebarProps {
   onTagsChange: (tags: string[]) => void;
   selectedCollection: string | undefined;
   onCollectionChange: (id: string | undefined) => void;
-  selectedCreator: string | undefined;
-  onCreatorChange: (creator: string | undefined) => void;
   selectedFilaments: string[];
   onFilamentsChange: (filaments: string[]) => void;
   selectedSize: string | undefined;
@@ -26,8 +24,6 @@ export default function Sidebar({
   onTagsChange,
   selectedCollection,
   onCollectionChange,
-  selectedCreator,
-  onCreatorChange,
   selectedFilaments,
   onFilamentsChange,
   selectedSize,
@@ -38,19 +34,17 @@ export default function Sidebar({
 }: SidebarProps) {
   const [tags, setTags] = useState<TagWithCount[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [creators, setCreators] = useState<string[]>([]);
   const [filaments, setFilaments] = useState<FilamentInfo[]>([]);
   const [sizes, setSizes] = useState<string[]>([]);
   const [showTagManager, setShowTagManager] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
 
   const loadFilters = useCallback(async () => {
-    const [t, c, cr, fl, sz] = await Promise.all([
-      listTags(), listCollections(), listCreators(), listAllFilaments(), listAllSizes(),
+    const [t, c, fl, sz] = await Promise.all([
+      listTags(), listCollections(), listAllFilaments(), listAllSizes(),
     ]);
     setTags(t);
     setCollections(c);
-    setCreators(cr);
     setFilaments(fl);
     setSizes(sz);
   }, []);
@@ -70,7 +64,6 @@ export default function Sidebar({
   function clearAll() {
     onTagsChange([]);
     onCollectionChange(undefined);
-    onCreatorChange(undefined);
     onFilamentsChange([]);
     onSizeChange(undefined);
   }
@@ -79,7 +72,6 @@ export default function Sidebar({
     hasSearch ||
     selectedTags.length > 0 ||
     selectedCollection !== undefined ||
-    selectedCreator !== undefined ||
     selectedFilaments.length > 0 ||
     selectedSize !== undefined;
 
@@ -100,14 +92,6 @@ export default function Sidebar({
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
-        {hasFilters && (
-          <button
-            onClick={onClearAll || clearAll}
-            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline cursor-pointer -mt-3"
-          >
-            Clear all filters
-          </button>
-        )}
 
         {/* Collections */}
         <div>
@@ -206,43 +190,6 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Creator */}
-        {creators.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Creator
-            </h3>
-            <ul className="space-y-1">
-              <li>
-                <button
-                  onClick={() => onCreatorChange(undefined)}
-                  className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
-                    selectedCreator === undefined
-                      ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
-                      : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
-                  }`}
-                >
-                  All Creators
-                </button>
-              </li>
-              {creators.map((cr) => (
-                <li key={cr}>
-                  <button
-                    onClick={() => onCreatorChange(cr)}
-                    className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
-                      selectedCreator === cr
-                        ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
-                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
-                    }`}
-                  >
-                    {cr}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {/* Filaments */}
         {filaments.length > 0 && (
           <div>
@@ -311,6 +258,18 @@ export default function Sidebar({
         )}
 
         </div>
+
+        {/* Fixed footer */}
+        {hasFilters && (
+          <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+            <button
+              onClick={onClearAll || clearAll}
+              className="w-full text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer transition-colors py-1.5 px-3 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
       </aside>
 
       <TagManager

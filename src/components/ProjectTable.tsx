@@ -83,9 +83,6 @@ export default function ProjectTable({
               Name
             </th>
             <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">
-              Creator
-            </th>
-            <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">
               Filaments
             </th>
             <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">
@@ -162,11 +159,6 @@ export default function ProjectTable({
                   <span className="font-medium text-gray-900 dark:text-gray-100">
                     {project.name}
                   </span>
-                </td>
-
-                {/* Creator */}
-                <td className="px-3 py-2 text-gray-500 dark:text-gray-400">
-                  {project.creator || "—"}
                 </td>
 
                 {/* Filaments */}

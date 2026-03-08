@@ -20,7 +20,7 @@ export async function getProject(id: string): Promise<Project> {
   return invoke("get_project", { id });
 }
 
-export async function updateProject(id: string, updates: { name?: string; description?: string; creator?: string }): Promise<void> {
+export async function updateProject(id: string, updates: { name?: string; description?: string }): Promise<void> {
   return invoke("update_project", { id, req: updates });
 }
 
@@ -56,12 +56,6 @@ export async function deleteTag(id: string): Promise<void> {
 
 export async function setProjectTags(projectId: string, tagIds: string[]): Promise<void> {
   return invoke("set_project_tags", { projectId, tagIds });
-}
-
-// ── Creators ──
-
-export async function listCreators(): Promise<string[]> {
-  return invoke("list_creators");
 }
 
 // ── Filament & Size Filters ──

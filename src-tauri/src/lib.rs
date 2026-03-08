@@ -40,8 +40,6 @@ pub fn run() {
             commands::update_tag,
             commands::delete_tag,
             commands::set_project_tags,
-            // Creators
-            commands::list_creators,
             // Filament & Size filters
             commands::list_all_filaments,
             commands::list_all_sizes,

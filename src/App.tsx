@@ -20,7 +20,6 @@ function App() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
-  const [selectedCreator, setSelectedCreator] = useState<string | undefined>();
   const [selectedFilaments, setSelectedFilaments] = useState<string[]>([]);
   const [selectedSize, setSelectedSize] = useState<string | undefined>();
   const [showCreate, setShowCreate] = useState(false);
@@ -39,14 +38,13 @@ function App() {
       search: search || undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       collection_id: selectedCollection,
-      creator: selectedCreator,
       filaments: selectedFilaments.length > 0 ? selectedFilaments : undefined,
       size: selectedSize,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, selectedCollection, selectedCreator, selectedFilaments, selectedSize, sortBy, sortOrder]);
+  }, [search, selectedTags, selectedCollection, selectedFilaments, selectedSize, sortBy, sortOrder]);
 
   // Reload when filters change (debounce search)
   useEffect(() => {
@@ -175,8 +173,6 @@ function App() {
         onTagsChange={setSelectedTags}
         selectedCollection={selectedCollection}
         onCollectionChange={setSelectedCollection}
-        selectedCreator={selectedCreator}
-        onCreatorChange={setSelectedCreator}
         selectedFilaments={selectedFilaments}
         onFilamentsChange={setSelectedFilaments}
         selectedSize={selectedSize}
@@ -187,7 +183,6 @@ function App() {
           setSearch("");
           setSelectedTags([]);
           setSelectedCollection(undefined);
-          setSelectedCreator(undefined);
           setSelectedFilaments([]);
           setSelectedSize(undefined);
         }}
