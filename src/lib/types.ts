@@ -19,6 +19,8 @@ export interface ProjectSummary {
   updated_at: string;
   tags: Tag[];
   file_count: number;
+  filaments: FilamentInfo[];
+  size: string | null;
 }
 
 export interface Tag {
@@ -82,7 +84,7 @@ export interface ListProjectsRequest {
   tag_ids?: string[];
   collection_id?: string;
   creator?: string;
-  filament?: string;
+  filaments?: string[];
   size?: string;
   sort_by?: SortBy;
   sort_order?: SortOrder;

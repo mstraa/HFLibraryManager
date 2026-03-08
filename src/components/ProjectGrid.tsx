@@ -6,6 +6,8 @@ interface ProjectGridProps {
   onProjectClick: (id: string) => void;
   selectedIds: string[];
   onToggleSelect: (id: string) => void;
+  onFilamentClick?: (hexColor: string) => void;
+  onSizeClick?: (size: string) => void;
 }
 
 export default function ProjectGrid({
@@ -13,6 +15,8 @@ export default function ProjectGrid({
   onProjectClick,
   selectedIds,
   onToggleSelect,
+  onFilamentClick,
+  onSizeClick,
 }: ProjectGridProps) {
   const selectionMode = selectedIds.length > 0;
 
@@ -53,6 +57,8 @@ export default function ProjectGrid({
             selected={selectedIds.includes(project.id)}
             selectionMode={selectionMode}
             onToggleSelect={onToggleSelect}
+            onFilamentClick={onFilamentClick}
+            onSizeClick={onSizeClick}
           />
         ))}
       </div>

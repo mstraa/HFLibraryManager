@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -274,17 +274,32 @@ function FileRow({
 
 // ── Main Component ──
 
-const THUMBNAIL_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
+const THUMBNAIL_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
 
 interface FileListProps {
   files: ProjectFile[];
   projectId: string;
   onRefresh: () => void;
   onSetThumbnail?: (filePath: string) => void;
+  openPreviewFileId?: string | null;
+  onPreviewChange?: (fileId: string | null) => void;
 }
 
-export default function FileList({ files, projectId, onRefresh, onSetThumbnail }: FileListProps) {
-  const [previewFile, setPreviewFile] = useState<ProjectFile | null>(null);
+export default function FileList({ files, projectId, onRefresh, onSetThumbnail, openPreviewFileId, onPreviewChange }: FileListProps) {
+  const [previewFile, setPreviewFileState] = useState<ProjectFile | null>(null);
+
+  // Allow external control of preview
+  useEffect(() => {
+    if (openPreviewFileId) {
+      const file = files.find(f => f.id === openPreviewFileId);
+      if (file) setPreviewFileState(file);
+    }
+  }, [openPreviewFileId, files]);
+
+  function setPreviewFile(file: ProjectFile | null) {
+    setPreviewFileState(file);
+    onPreviewChange?.(file?.id ?? null);
+  }
   const [syncing, setSyncing] = useState(false);
 
   // Separate favorites and group remaining files

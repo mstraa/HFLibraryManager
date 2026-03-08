@@ -165,20 +165,16 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Filter by filament (format: "brand|name")
-    if let Some(filament) = &req.filament {
-        if !filament.is_empty() {
-            let parts: Vec<&str> = filament.splitn(2, '|').collect();
-            if parts.len() == 2 {
-                conditions.push(format!(
-                    "p.id IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
-                     WHERE f.favorited = 1 AND json_extract(je.value, '$.brand') = ?{} AND json_extract(je.value, '$.name') = ?{})",
-                    param_idx, param_idx + 1
-                ));
-                params.push(Box::new(parts[0].to_string()));
-                params.push(Box::new(parts[1].to_string()));
-                param_idx += 2;
-            }
+    // Filter by filaments (format: ["#hexcolor", ...]) — AND logic, match by hex color
+    if let Some(filaments) = &req.filaments {
+        for filament in filaments {
+            conditions.push(format!(
+                "p.id IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
+                 WHERE f.favorited = 1 AND LOWER(json_extract(je.value, '$.color')) = ?{})",
+                param_idx
+            ));
+            params.push(Box::new(filament.to_lowercase()));
+            param_idx += 1;
         }
     }
 
@@ -229,6 +225,8 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
             updated_at: row.get(5)?,
             tags: vec![],
             file_count: row.get(6)?,
+            filaments: vec![],
+            size: None,
         })
     }).map_err(map_err)?;
 
@@ -236,6 +234,8 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
     for row in rows {
         let mut p = row.map_err(map_err)?;
         p.tags = get_project_tags(&conn, &p.id).map_err(map_err)?;
+        p.filaments = get_project_filaments(&conn, &p.id).map_err(map_err)?;
+        p.size = get_project_size(&conn, &p.id).map_err(map_err)?;
         projects.push(p);
     }
 
@@ -752,12 +752,25 @@ pub fn set_project_thumbnail(db: State<Database>, project_id: String, source_pat
     let conn = db.conn.lock().map_err(map_err)?;
 
     let dest_dir = Database::data_dir().join("projects").join(&project_id).join("thumbnails");
+    let source = Path::new(&source_path);
 
-    let dest_path = thumbnails::generate_thumbnail_from_file(
-        Path::new(&source_path),
-        &dest_dir,
-        "cover.png",
-    ).ok_or_else(|| "Failed to generate thumbnail from image".to_string())?;
+    let is_svg = source.extension()
+        .map(|e| e.to_ascii_lowercase() == "svg")
+        .unwrap_or(false);
+
+    let dest_path = if is_svg {
+        // SVG can't be rasterized by the image crate — copy as-is
+        fs::create_dir_all(&dest_dir).map_err(map_err)?;
+        let dest = dest_dir.join("cover.svg");
+        fs::copy(source, &dest).map_err(map_err)?;
+        dest
+    } else {
+        thumbnails::generate_thumbnail_from_file(
+            source,
+            &dest_dir,
+            "cover.png",
+        ).ok_or_else(|| "Failed to generate thumbnail from image".to_string())?
+    };
 
     let dest_str = dest_path.to_string_lossy().to_string();
     let now = Utc::now().to_rfc3339();
@@ -902,13 +915,16 @@ pub fn list_creators(db: State<Database>) -> CmdResult<Vec<String>> {
 pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
     let conn = db.conn.lock().map_err(map_err)?;
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT
-            json_extract(je.value, '$.color') as color,
-            json_extract(je.value, '$.name') as name,
-            json_extract(je.value, '$.brand') as brand
-         FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
-         WHERE files.favorited = 1
-           AND json_extract(files.metadata, '$.filaments') IS NOT NULL
+        "SELECT color, name, brand FROM (
+            SELECT
+                json_extract(je.value, '$.color') as color,
+                json_extract(je.value, '$.name') as name,
+                json_extract(je.value, '$.brand') as brand,
+                ROW_NUMBER() OVER (PARTITION BY LOWER(json_extract(je.value, '$.color')) ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
+            FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
+            WHERE files.favorited = 1
+              AND json_extract(files.metadata, '$.filaments') IS NOT NULL
+         ) WHERE rn = 1
          ORDER BY brand, name"
     ).map_err(map_err)?;
 
@@ -1071,6 +1087,44 @@ fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rus
         Ok(Tag { id: row.get(0)?, name: row.get(1)?, color: row.get(2)? })
     })?;
     rows.collect()
+}
+
+fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<FilamentInfo>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT color, name, brand FROM (
+            SELECT
+                json_extract(je.value, '$.color') as color,
+                json_extract(je.value, '$.name') as name,
+                json_extract(je.value, '$.brand') as brand,
+                ROW_NUMBER() OVER (PARTITION BY LOWER(json_extract(je.value, '$.color')) ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
+            FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je
+            WHERE f.project_id = ?1 AND f.favorited = 1
+              AND json_extract(f.metadata, '$.filaments') IS NOT NULL
+        ) WHERE rn = 1
+        ORDER BY brand, name"
+    )?;
+    let rows = stmt.query_map(rusqlite::params![project_id], |row| {
+        Ok(FilamentInfo { color: row.get(0)?, name: row.get(1)?, brand: row.get(2)? })
+    })?;
+    rows.collect()
+}
+
+fn get_project_size(conn: &Connection, project_id: &str) -> Result<Option<String>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT
+            CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
+            CAST(ROUND(json_extract(metadata, '$.height_mm')) AS INTEGER) || 'mm'
+         FROM files
+         WHERE project_id = ?1 AND favorited = 1
+           AND json_extract(metadata, '$.width_mm') IS NOT NULL
+           AND json_extract(metadata, '$.height_mm') IS NOT NULL
+         LIMIT 1"
+    )?;
+    let mut rows = stmt.query_map(rusqlite::params![project_id], |row| row.get::<_, String>(0))?;
+    match rows.next() {
+        Some(Ok(size)) => Ok(Some(size)),
+        _ => Ok(None),
+    }
 }
 
 fn get_project_collections(conn: &Connection, project_id: &str) -> Result<Vec<CollectionSummary>, rusqlite::Error> {

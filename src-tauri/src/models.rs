@@ -23,6 +23,8 @@ pub struct ProjectSummary {
     pub updated_at: String,
     pub tags: Vec<Tag>,
     pub file_count: i64,
+    pub filaments: Vec<FilamentInfo>,
+    pub size: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -145,7 +147,7 @@ pub struct ListProjectsRequest {
     pub tag_ids: Option<Vec<String>>,
     pub collection_id: Option<String>,
     pub creator: Option<String>,
-    pub filament: Option<String>,
+    pub filaments: Option<Vec<String>>,
     pub size: Option<String>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,

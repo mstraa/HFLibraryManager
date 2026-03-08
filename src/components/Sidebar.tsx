@@ -12,12 +12,14 @@ interface SidebarProps {
   onCollectionChange: (id: string | undefined) => void;
   selectedCreator: string | undefined;
   onCreatorChange: (creator: string | undefined) => void;
-  selectedFilament: string | undefined;
-  onFilamentChange: (filament: string | undefined) => void;
+  selectedFilaments: string[];
+  onFilamentsChange: (filaments: string[]) => void;
   selectedSize: string | undefined;
   onSizeChange: (size: string | undefined) => void;
   onCreateProject: () => void;
   refreshKey?: number;
+  hasSearch?: boolean;
+  onClearAll?: () => void;
 }
 
 export default function Sidebar({
@@ -27,12 +29,14 @@ export default function Sidebar({
   onCollectionChange,
   selectedCreator,
   onCreatorChange,
-  selectedFilament,
-  onFilamentChange,
+  selectedFilaments,
+  onFilamentsChange,
   selectedSize,
   onSizeChange,
   onCreateProject,
   refreshKey,
+  hasSearch,
+  onClearAll,
 }: SidebarProps) {
   const [tags, setTags] = useState<TagWithCount[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -73,15 +77,16 @@ export default function Sidebar({
     onTagsChange([]);
     onCollectionChange(undefined);
     onCreatorChange(undefined);
-    onFilamentChange(undefined);
+    onFilamentsChange([]);
     onSizeChange(undefined);
   }
 
   const hasFilters =
+    hasSearch ||
     selectedTags.length > 0 ||
     selectedCollection !== undefined ||
     selectedCreator !== undefined ||
-    selectedFilament !== undefined ||
+    selectedFilaments.length > 0 ||
     selectedSize !== undefined;
 
   async function handleChangeLibraryPath() {
@@ -110,6 +115,15 @@ export default function Sidebar({
         >
           + New Project
         </button>
+
+        {hasFilters && (
+          <button
+            onClick={onClearAll || clearAll}
+            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline cursor-pointer -mt-3"
+          >
+            Clear all filters
+          </button>
+        )}
 
         {/* Collections */}
         <div>
@@ -251,36 +265,37 @@ export default function Sidebar({
             <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
               Filaments
             </h3>
-            <div className="flex flex-wrap gap-1.5">
+            <ul className="space-y-0.5">
               {filaments.map((f) => {
-                const key = `${f.brand}|${f.name}`;
-                const isActive = selectedFilament === key;
+                const key = f.color.toLowerCase();
+                const isActive = selectedFilaments.includes(key);
                 return (
-                  <button
-                    key={key}
-                    onClick={() => onFilamentChange(isActive ? undefined : key)}
-                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
-                      isActive
-                        ? "ring-2 ring-offset-1 ring-indigo-400"
-                        : "opacity-70 hover:opacity-100"
-                    }`}
-                    style={{
-                      backgroundColor: f.color + "22",
-                      borderColor: f.color,
-                    }}
-                    title={`${f.brand} ${f.name} (${f.color})`}
-                  >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-gray-300 dark:border-gray-500"
-                      style={{ backgroundColor: f.color }}
-                    />
-                    <span className="text-gray-700 dark:text-gray-300 truncate max-w-[100px]">
-                      {f.name}
-                    </span>
-                  </button>
+                  <li key={key}>
+                    <button
+                      onClick={() => {
+                        if (isActive) {
+                          onFilamentsChange(selectedFilaments.filter((k) => k !== key));
+                        } else {
+                          onFilamentsChange([...selectedFilaments, key]);
+                        }
+                      }}
+                      className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
+                        isActive
+                          ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
+                          : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                      }`}
+                      title={`${f.brand} ${f.name} (${f.color})`}
+                    >
+                      <span
+                        className="w-3 h-3 rounded-full shrink-0 border border-gray-300 dark:border-gray-500"
+                        style={{ backgroundColor: f.color }}
+                      />
+                      <span className="truncate">{f.brand} {f.name}</span>
+                    </button>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           </div>
         )}
 
@@ -309,16 +324,6 @@ export default function Sidebar({
               })}
             </div>
           </div>
-        )}
-
-        {/* Clear filters */}
-        {hasFilters && (
-          <button
-            onClick={clearAll}
-            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline cursor-pointer"
-          >
-            Clear all filters
-          </button>
         )}
 
         {/* Spacer */}

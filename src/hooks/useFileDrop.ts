@@ -1,0 +1,42 @@
+import { useCallback, useEffect, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+
+export function useFileDrop(onDrop: (paths: string[]) => void) {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const stableOnDrop = useCallback(onDrop, [onDrop]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (cancelled) return;
+        if (event.payload.type === "enter") {
+          setIsDragging(true);
+        } else if (event.payload.type === "leave") {
+          setIsDragging(false);
+        } else if (event.payload.type === "drop") {
+          setIsDragging(false);
+          if (event.payload.paths && event.payload.paths.length > 0) {
+            stableOnDrop(event.payload.paths);
+          }
+        }
+      })
+      .then((fn) => {
+        if (cancelled) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [stableOnDrop]);
+
+  return { isDragging };
+}

@@ -8,6 +8,8 @@ interface ProjectCardProps {
   selected?: boolean;
   selectionMode?: boolean;
   onToggleSelect?: (id: string) => void;
+  onFilamentClick?: (hexColor: string) => void;
+  onSizeClick?: (size: string) => void;
 }
 
 function formatRelativeDate(iso: string): string {
@@ -30,6 +32,8 @@ export default function ProjectCard({
   selected = false,
   selectionMode = false,
   onToggleSelect,
+  onFilamentClick,
+  onSizeClick,
 }: ProjectCardProps) {
   function handleClick(e: React.MouseEvent) {
     if (selectionMode && onToggleSelect) {
@@ -103,23 +107,55 @@ export default function ProjectCard({
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-1 mt-2">
-          {project.tags.map((tag) => (
-            <span
-              key={tag.id}
-              className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
-              style={{ backgroundColor: tag.color }}
-            >
-              {tag.name}
-            </span>
-          ))}
-        </div>
+        {project.filaments.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {project.filaments.map((f) => (
+              <button
+                key={f.color}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFilamentClick?.(f.color.toLowerCase());
+                }}
+                className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 cursor-pointer hover:scale-125 transition-transform"
+                style={{ backgroundColor: f.color }}
+                title={`${f.brand} ${f.name} (${f.color})`}
+              />
+            ))}
+          </div>
+        )}
 
-        {project.file_count > 0 && (
-          <div className="mt-1.5">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
-              {project.file_count} file{project.file_count !== 1 ? "s" : ""}
-            </span>
+        {(project.size || project.file_count > 0) && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {project.size && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSizeClick?.(project.size!);
+                }}
+                className="text-[10px] px-1.5 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-indigo-400 hover:text-indigo-600 dark:hover:border-indigo-500 dark:hover:text-indigo-400 cursor-pointer transition-colors"
+              >
+                {project.size}
+              </button>
+            )}
+            {project.file_count > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                {project.file_count} file{project.file_count !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        )}
+
+        {project.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {project.tags.map((tag) => (
+              <span
+                key={tag.id}
+                className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
+                style={{ backgroundColor: tag.color }}
+              >
+                {tag.name}
+              </span>
+            ))}
           </div>
         )}
       </div>
