@@ -221,6 +221,23 @@ impl Database {
             )?;
         }
 
+        // Migration: add modified_at column to files
+        let has_modified_at: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'modified_at'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if !has_modified_at {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN modified_at TEXT NOT NULL DEFAULT '';"
+            )?;
+            // Backfill from created_at for existing rows
+            conn.execute_batch(
+                "UPDATE files SET modified_at = created_at WHERE modified_at = '';"
+            )?;
+        }
+
         // Migration: rename affinity directories to design
         let projects_dir = Self::data_dir().join("projects");
         if projects_dir.exists() {

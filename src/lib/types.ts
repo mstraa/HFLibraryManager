@@ -72,6 +72,7 @@ export interface ProjectFile {
   favorited: boolean;
   metadata: string;
   created_at: string;
+  modified_at: string;
 }
 
 export type SortBy = "name" | "created_at" | "updated_at";

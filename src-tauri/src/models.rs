@@ -69,6 +69,7 @@ pub struct ProjectFile {
     pub favorited: bool,
     pub metadata: String,
     pub created_at: String,
+    pub modified_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

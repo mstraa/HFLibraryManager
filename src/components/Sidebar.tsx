@@ -5,6 +5,22 @@ import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
 import { onDragMouseDown } from "../hooks/useDrag";
 
+const STORAGE_KEY = "sidebar-collapsed";
+
+type SectionKey = "collections" | "tags" | "filaments" | "sizes";
+
+function loadCollapsed(): Record<SectionKey, boolean> {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch { /* ignore */ }
+  return { collections: false, tags: false, filaments: false, sizes: false };
+}
+
+function saveCollapsed(state: Record<SectionKey, boolean>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
 interface SidebarProps {
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
@@ -38,6 +54,15 @@ export default function Sidebar({
   const [sizes, setSizes] = useState<string[]>([]);
   const [showTagManager, setShowTagManager] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(loadCollapsed);
+
+  function toggleSection(key: SectionKey) {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      saveCollapsed(next);
+      return next;
+    });
+  }
 
   const loadFilters = useCallback(async () => {
     const [t, c, fl, sz] = await Promise.all([
@@ -96,164 +121,208 @@ export default function Sidebar({
         {/* Collections */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              Collections
-            </h3>
-            <button
-              onClick={() => setShowCollectionManager(true)}
-              className="text-gray-400 hover:text-indigo-500 cursor-pointer"
-              title="Manage collections"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-            </button>
-          </div>
-          <ul className="space-y-1">
-            <li>
-              <button
-                onClick={() => onCollectionChange(undefined)}
-                className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
-                  selectedCollection === undefined
-                    ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
-                }`}
+            <button onClick={() => toggleSection("collections")} className="flex items-center gap-1 cursor-pointer group">
+              <svg
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${collapsed.collections ? "" : "rotate-90"}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
               >
-                All Projects
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                Collections
+              </h3>
+            </button>
+            {!collapsed.collections && (
+              <button
+                onClick={() => setShowCollectionManager(true)}
+                className="text-gray-400 hover:text-indigo-500 cursor-pointer"
+                title="Manage collections"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
               </button>
-            </li>
-            {collections.map((c) => (
-              <li key={c.id}>
+            )}
+          </div>
+          {!collapsed.collections && (
+            <ul className="space-y-1">
+              <li>
                 <button
-                  onClick={() => onCollectionChange(c.id)}
+                  onClick={() => onCollectionChange(undefined)}
                   className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
-                    selectedCollection === c.id
+                    selectedCollection === undefined
                       ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
                       : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
                   }`}
                 >
-                  {c.name}
-                  <span className="text-gray-400 dark:text-gray-500 ml-1 text-xs">
-                    {c.project_count}
-                  </span>
+                  All Projects
                 </button>
               </li>
-            ))}
-          </ul>
+              {collections.map((c) => (
+                <li key={c.id}>
+                  <button
+                    onClick={() => onCollectionChange(c.id)}
+                    className={`w-full text-left text-sm px-2 py-1 rounded cursor-pointer transition-colors ${
+                      selectedCollection === c.id
+                        ? "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-medium"
+                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    {c.name}
+                    <span className="text-gray-400 dark:text-gray-500 ml-1 text-xs">
+                      {c.project_count}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {/* Tags */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              Tags
-            </h3>
-            <button
-              onClick={() => setShowTagManager(true)}
-              className="text-gray-400 hover:text-indigo-500 cursor-pointer"
-              title="Manage tags"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            <button onClick={() => toggleSection("tags")} className="flex items-center gap-1 cursor-pointer group">
+              <svg
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${collapsed.tags ? "" : "rotate-90"}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                Tags
+              </h3>
             </button>
-          </div>
-          {tags.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              No tags yet.{" "}
-              <button onClick={() => setShowTagManager(true)} className="text-indigo-500 hover:underline cursor-pointer">
-                Create one
+            {!collapsed.tags && (
+              <button
+                onClick={() => setShowTagManager(true)}
+                className="text-gray-400 hover:text-indigo-500 cursor-pointer"
+                title="Manage tags"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
               </button>
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {tags.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => toggleTag(t.id)}
-                  className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
-                    selectedTags.includes(t.id)
-                      ? "ring-2 ring-offset-1 ring-indigo-400"
-                      : "opacity-70 hover:opacity-100"
-                  }`}
-                  style={{
-                    backgroundColor: t.color + "22",
-                    borderColor: t.color,
-                    color: t.color,
-                  }}
-                >
-                  {t.name}
-                  <span className="ml-0.5 opacity-60">{t.project_count}</span>
+            )}
+          </div>
+          {!collapsed.tags && (
+            tags.length === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                No tags yet.{" "}
+                <button onClick={() => setShowTagManager(true)} className="text-indigo-500 hover:underline cursor-pointer">
+                  Create one
                 </button>
-              ))}
-            </div>
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => toggleTag(t.id)}
+                    className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
+                      selectedTags.includes(t.id)
+                        ? "ring-2 ring-offset-1 ring-indigo-400"
+                        : "opacity-70 hover:opacity-100"
+                    }`}
+                    style={{
+                      backgroundColor: t.color + "22",
+                      borderColor: t.color,
+                      color: t.color,
+                    }}
+                  >
+                    {t.name}
+                    <span className="ml-0.5 opacity-60">{t.project_count}</span>
+                  </button>
+                ))}
+              </div>
+            )
           )}
         </div>
 
         {/* Filaments */}
         {filaments.length > 0 && (
           <div>
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Filaments
-            </h3>
-            <ul className="space-y-0.5">
-              {filaments.map((f) => {
-                const key = f.color.toLowerCase();
-                const isActive = selectedFilaments.includes(key);
-                return (
-                  <li key={key}>
-                    <button
-                      onClick={() => {
-                        if (isActive) {
-                          onFilamentsChange(selectedFilaments.filter((k) => k !== key));
-                        } else {
-                          onFilamentsChange([...selectedFilaments, key]);
-                        }
-                      }}
-                      className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
-                        isActive
-                          ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
-                          : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
-                      }`}
-                      title={`${f.brand} ${f.name} (${f.color})`}
-                    >
-                      <span
-                        className="w-3 h-3 rounded-full shrink-0 border border-gray-300 dark:border-gray-500"
-                        style={{ backgroundColor: f.color }}
-                      />
-                      <span className="truncate">{f.brand} {f.name}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <button onClick={() => toggleSection("filaments")} className="flex items-center gap-1 cursor-pointer group mb-2">
+              <svg
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${collapsed.filaments ? "" : "rotate-90"}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                Filaments
+              </h3>
+            </button>
+            {!collapsed.filaments && (
+              <ul className="space-y-0.5">
+                {filaments.map((f) => {
+                  const key = f.color.toLowerCase();
+                  const isActive = selectedFilaments.includes(key);
+                  return (
+                    <li key={key}>
+                      <button
+                        onClick={() => {
+                          if (isActive) {
+                            onFilamentsChange(selectedFilaments.filter((k) => k !== key));
+                          } else {
+                            onFilamentsChange([...selectedFilaments, key]);
+                          }
+                        }}
+                        className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
+                          isActive
+                            ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
+                            : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                        }`}
+                        title={`${f.brand} ${f.name} (${f.color})`}
+                      >
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0 border border-gray-300 dark:border-gray-500"
+                          style={{ backgroundColor: f.color }}
+                        />
+                        <span className="truncate">{f.brand} {f.name}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         )}
 
         {/* Sizes */}
         {sizes.length > 0 && (
           <div>
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-              Sizes
-            </h3>
-            <div className="flex flex-wrap gap-1.5">
-              {sizes.map((s) => {
-                const isActive = selectedSize === s;
-                return (
-                  <button
-                    key={s}
-                    onClick={() => onSizeChange(isActive ? undefined : s)}
-                    className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border border-gray-300 dark:border-gray-600 ${
-                      isActive
-                        ? "ring-2 ring-offset-1 ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
-                        : "text-gray-600 dark:text-gray-400 opacity-70 hover:opacity-100"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
+            <button onClick={() => toggleSection("sizes")} className="flex items-center gap-1 cursor-pointer group mb-2">
+              <svg
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${collapsed.sizes ? "" : "rotate-90"}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                Sizes
+              </h3>
+            </button>
+            {!collapsed.sizes && (
+              <div className="flex flex-wrap gap-1.5">
+                {sizes.map((s) => {
+                  const isActive = selectedSize === s;
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => onSizeChange(isActive ? undefined : s)}
+                      className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border border-gray-300 dark:border-gray-600 ${
+                        isActive
+                          ? "ring-2 ring-offset-1 ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
+                          : "text-gray-600 dark:text-gray-400 opacity-70 hover:opacity-100"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

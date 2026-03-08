@@ -16,6 +16,8 @@ import {
   addProjectToCollection,
   removeProjectFromCollection,
   openFileWithApp,
+  createTag,
+  createCollection,
 } from "../lib/api";
 import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, FilamentInfo } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
@@ -46,6 +48,10 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const filesSectionRef = useRef<HTMLDivElement>(null);
   const [importingFiles, setImportingFiles] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [showNewTag, setShowNewTag] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [showNewCollection, setShowNewCollection] = useState(false);
 
   const loadProject = useCallback(async (sync = false) => {
     if (sync) {
@@ -127,6 +133,28 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
     } else {
       await addProjectToCollection(projectId, collectionId);
     }
+    loadProject();
+  }
+
+  async function handleCreateTag() {
+    const name = newTagName.trim();
+    if (!name || !project) return;
+    const tag = await createTag(name);
+    // Auto-assign to current project
+    const currentIds = project.tags.map((t) => t.id);
+    await setProjectTags(projectId, [...currentIds, tag.id]);
+    setNewTagName("");
+    setShowNewTag(false);
+    loadProject();
+  }
+
+  async function handleCreateCollection() {
+    const name = newCollectionName.trim();
+    if (!name || !project) return;
+    const collection = await createCollection(name);
+    await addProjectToCollection(projectId, collection.id);
+    setNewCollectionName("");
+    setShowNewCollection(false);
     loadProject();
   }
 
@@ -305,9 +333,22 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
 
             {/* Tags */}
             <div className="flex-1">
-              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-                Tags
-              </h3>
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Tags
+                </h3>
+                {!showNewTag && (
+                  <button
+                    onClick={() => setShowNewTag(true)}
+                    className="text-gray-400 hover:text-indigo-500 cursor-pointer"
+                    title="Create new tag"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </button>
+                )}
+              </div>
               <div className="flex flex-wrap gap-1.5">
                 {allTags.map((tag) => {
                   const isActive = project.tags.some((t) => t.id === tag.id);
@@ -330,7 +371,21 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
                     </button>
                   );
                 })}
-                {allTags.length === 0 && (
+                {showNewTag && (
+                  <input
+                    autoFocus
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    onBlur={() => { if (!newTagName.trim()) setShowNewTag(false); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleCreateTag();
+                      if (e.key === "Escape") { setShowNewTag(false); setNewTagName(""); }
+                    }}
+                    placeholder="Tag name..."
+                    className="text-xs px-2.5 py-1 rounded-full border border-indigo-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-24"
+                  />
+                )}
+                {allTags.length === 0 && !showNewTag && (
                   <span className="text-xs text-gray-400 dark:text-gray-500">
                     No tags created yet
                   </span>
@@ -339,9 +394,22 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
 
               {/* Collections */}
               <div className="mt-3">
-                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
-                  Collections
-                </h3>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Collections
+                  </h3>
+                  {!showNewCollection && (
+                    <button
+                      onClick={() => setShowNewCollection(true)}
+                      className="text-gray-400 hover:text-indigo-500 cursor-pointer"
+                      title="Create new collection"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {allCollections.map((c) => {
                     const isIn = project.collections.some((pc) => pc.id === c.id);
@@ -360,7 +428,21 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onFilterBy
                       </button>
                     );
                   })}
-                  {allCollections.length === 0 && (
+                  {showNewCollection && (
+                    <input
+                      autoFocus
+                      value={newCollectionName}
+                      onChange={(e) => setNewCollectionName(e.target.value)}
+                      onBlur={() => { if (!newCollectionName.trim()) setShowNewCollection(false); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleCreateCollection();
+                        if (e.key === "Escape") { setShowNewCollection(false); setNewCollectionName(""); }
+                      }}
+                      placeholder="Collection name..."
+                      className="text-xs px-2.5 py-1 rounded-lg border border-indigo-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-32"
+                    />
+                  )}
+                  {allCollections.length === 0 && !showNewCollection && (
                     <span className="text-xs text-gray-400 dark:text-gray-500">
                       No collections created yet
                     </span>

@@ -10,6 +10,16 @@ use chrono::Utc;
 
 type CmdResult<T> = Result<T, String>;
 
+fn file_modified_time(path: &Path) -> String {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .map(|t| {
+            let dt: chrono::DateTime<Utc> = t.into();
+            dt.to_rfc3339()
+        })
+        .unwrap_or_else(|_| Utc::now().to_rfc3339())
+}
+
 fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
@@ -397,7 +407,7 @@ pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<V
     let conn = db.conn.lock().map_err(map_err)?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at
+        "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at
          FROM files WHERE project_id = ?1 ORDER BY created_at DESC"
     ).map_err(map_err)?;
 
@@ -413,6 +423,7 @@ pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<V
             favorited: row.get::<_, i32>(7)? != 0,
             metadata: row.get(8)?,
             created_at: row.get(9)?,
+            modified_at: row.get(10)?,
         })
     }).map_err(map_err)?;
 
@@ -442,6 +453,7 @@ pub fn import_files(
 
     for source_path in &source_paths {
         let source = Path::new(source_path);
+        let source_modified = file_modified_time(source);
         let original_filename = source.file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string());
@@ -484,9 +496,9 @@ pub fn import_files(
         };
 
         conn.execute(
-            "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![file_id, project_id, dest_str, stored_filename, file_size, "", thumb_path, now],
+            "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at, modified_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![file_id, project_id, dest_str, stored_filename, file_size, "", thumb_path, now, source_modified],
         ).map_err(map_err)?;
 
         // Auto-set project thumbnail from first 3mf if none set
@@ -515,6 +527,7 @@ pub fn import_files(
             favorited: false,
             metadata: "{}".to_string(),
             created_at: now.clone(),
+            modified_at: source_modified,
         });
     }
 
@@ -908,10 +921,11 @@ pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<
                 None
             };
 
+            let modified = file_modified_time(&path);
             conn.execute(
-                "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![file_id, project_id, file_path_str, filename, file_size, "", thumb_path, now],
+                "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at, modified_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![file_id, project_id, file_path_str, filename, file_size, "", thumb_path, now, modified],
             ).map_err(map_err)?;
             added += 1;
         }

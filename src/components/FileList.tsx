@@ -56,6 +56,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 // ── Preview Panel ──
 
 function PreviewPanel({ file, onClose }: { file: ProjectFile; onClose: () => void }) {
@@ -192,6 +198,11 @@ function FileRow({
           {file.file_size > 0 && (
             <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">
               {formatFileSize(file.file_size)}
+            </span>
+          )}
+          {file.modified_at && (
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0" title={`Created: ${formatDate(file.created_at)}\nModified: ${formatDate(file.modified_at)}`}>
+              {formatDate(file.modified_at)}
             </span>
           )}
         </div>
