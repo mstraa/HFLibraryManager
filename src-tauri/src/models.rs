@@ -102,6 +102,12 @@ pub struct SyncResult {
     pub removed: i32,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StorageSizes {
+    pub projects_size: u64,
+    pub deleted_size: u64,
+}
+
 // Request types
 
 #[derive(Debug, Deserialize)]

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, exportData } from "./lib/api";
-import type { ProjectSummary, SortBy, SortOrder } from "./lib/types";
+import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
 import ProjectGrid from "./components/ProjectGrid";
+import ProjectTable from "./components/ProjectTable";
 import CreateProjectDialog from "./components/CreateProjectDialog";
 import ProjectDetail from "./components/ProjectDetail";
 import BulkActions from "./components/BulkActions";
+import Settings from "./components/Settings";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useFileDrop } from "./hooks/useFileDrop";
 import "./App.css";
@@ -26,6 +28,8 @@ function App() {
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -154,6 +158,11 @@ function App() {
 
   const { isDragging } = useFileDrop(handleFolderDrop);
 
+  // Settings view
+  if (showSettings) {
+    return <Settings onBack={() => setShowSettings(false)} />;
+  }
+
   // Project detail view
   if (activeProjectId) {
     return (
@@ -195,6 +204,7 @@ function App() {
           setSelectedFilaments([]);
           setSelectedSize(undefined);
         }}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       <div className="flex-1 flex flex-col min-w-0 relative">
@@ -208,6 +218,8 @@ function App() {
           projectCount={projects.length}
           inputRef={searchInputRef}
           onExport={handleExport}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
 
         <BulkActions
@@ -219,16 +231,29 @@ function App() {
           }}
         />
 
-        <ProjectGrid
-          projects={projects}
-          onProjectClick={setActiveProjectId}
-          selectedIds={selectedProjectIds}
-          onToggleSelect={handleToggleSelect}
-          onFilamentClick={(hex) => setSelectedFilaments((prev) =>
-            prev.includes(hex) ? prev : [...prev, hex]
-          )}
-          onSizeClick={(size) => setSelectedSize(size)}
-        />
+        {viewMode === "grid" ? (
+          <ProjectGrid
+            projects={projects}
+            onProjectClick={setActiveProjectId}
+            selectedIds={selectedProjectIds}
+            onToggleSelect={handleToggleSelect}
+            onFilamentClick={(hex) => setSelectedFilaments((prev) =>
+              prev.includes(hex) ? prev : [...prev, hex]
+            )}
+            onSizeClick={(size) => setSelectedSize(size)}
+          />
+        ) : (
+          <ProjectTable
+            projects={projects}
+            onProjectClick={setActiveProjectId}
+            selectedIds={selectedProjectIds}
+            onToggleSelect={handleToggleSelect}
+            onFilamentClick={(hex) => setSelectedFilaments((prev) =>
+              prev.includes(hex) ? prev : [...prev, hex]
+            )}
+            onSizeClick={(size) => setSelectedSize(size)}
+          />
+        )}
 
         {/* Drop overlay */}
         {isDragging && !activeProjectId && (

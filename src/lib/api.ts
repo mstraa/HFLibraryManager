@@ -161,3 +161,11 @@ export async function getLibraryPath(): Promise<string> {
 export async function setLibraryPath(path: string, moveData: boolean): Promise<void> {
   return invoke("set_library_path", { path, moveData });
 }
+
+export async function getStorageSizes(): Promise<{ projects_size: number; deleted_size: number }> {
+  return invoke("get_storage_sizes");
+}
+
+export async function emptyTrash(): Promise<void> {
+  return invoke("empty_trash");
+}

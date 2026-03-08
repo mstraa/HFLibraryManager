@@ -101,10 +101,16 @@ pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
     let conn = db.conn.lock().map_err(map_err)?;
     conn.execute("DELETE FROM projects WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
 
-    // Remove project files
+    // Move project folder to deleted/
     let project_dir = Database::data_dir().join("projects").join(&id);
     if project_dir.exists() {
-        fs::remove_dir_all(&project_dir).map_err(map_err)?;
+        let trash_dir = Database::data_dir().join("deleted").join("projects").join(&id);
+        fs::create_dir_all(trash_dir.parent().unwrap()).map_err(map_err)?;
+        // If a previously deleted project with same id exists, remove it first
+        if trash_dir.exists() {
+            fs::remove_dir_all(&trash_dir).ok();
+        }
+        fs::rename(&project_dir, &trash_dir).map_err(map_err)?;
     }
 
     Ok(())
@@ -540,17 +546,40 @@ pub fn import_files(
 pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
     let conn = db.conn.lock().map_err(map_err)?;
 
-    let file_path: String = conn.query_row(
-        "SELECT file_path FROM files WHERE id = ?1",
+    let (file_path, project_id): (String, String) = conn.query_row(
+        "SELECT file_path, project_id FROM files WHERE id = ?1",
         rusqlite::params![file_id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(map_err)?;
 
     conn.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![file_id]).map_err(map_err)?;
 
+    // Move file to deleted/ folder
     let path = Path::new(&file_path);
     if path.exists() {
-        fs::remove_file(path).ok();
+        let filename = path.file_name().unwrap_or_default();
+        let trash_dir = Database::data_dir().join("deleted").join("files").join(&project_id);
+        fs::create_dir_all(&trash_dir).ok();
+        let dest = trash_dir.join(filename);
+        // If same filename already in trash, add file_id suffix
+        let dest = if dest.exists() {
+            let stem = dest.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let ext = dest.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            trash_dir.join(format!("{}_{}{}", stem, &file_id[..8], ext))
+        } else {
+            dest
+        };
+        fs::rename(path, &dest).ok();
+    }
+
+    // Also move thumbnail if it exists
+    let thumb_path = Database::data_dir()
+        .join("projects").join(&project_id).join("thumbnails")
+        .join(format!("file_{}.png", file_id));
+    if thumb_path.exists() {
+        let trash_thumb_dir = Database::data_dir().join("deleted").join("files").join(&project_id);
+        fs::create_dir_all(&trash_thumb_dir).ok();
+        fs::rename(&thumb_path, trash_thumb_dir.join(format!("file_{}.png", file_id))).ok();
     }
 
     Ok(())
@@ -1073,6 +1102,45 @@ pub fn set_library_path(path: String, move_data: bool) -> CmdResult<()> {
 
     config::set_library_path(path)?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_storage_sizes() -> CmdResult<StorageSizes> {
+    let base = Database::data_dir();
+    let projects_size = dir_size(&base.join("projects"));
+    let deleted_size = dir_size(&base.join("deleted"));
+    Ok(StorageSizes { projects_size, deleted_size })
+}
+
+#[tauri::command]
+pub fn empty_trash() -> CmdResult<()> {
+    let trash_dir = Database::data_dir().join("deleted");
+    if trash_dir.exists() {
+        fs::remove_dir_all(&trash_dir).map_err(map_err)?;
+    }
+    Ok(())
+}
+
+fn dir_size(path: &Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    walkdir(path)
+}
+
+fn walkdir(path: &Path) -> u64 {
+    let mut total: u64 = 0;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                total += walkdir(&p);
+            } else if let Ok(meta) = p.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
 }
 
 // ── Helpers ──

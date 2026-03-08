@@ -78,6 +78,7 @@ export interface ProjectFile {
 
 export type SortBy = "name" | "created_at" | "updated_at";
 export type SortOrder = "asc" | "desc";
+export type ViewMode = "grid" | "table";
 
 export interface ListProjectsRequest {
   search?: string;

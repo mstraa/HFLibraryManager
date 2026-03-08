@@ -67,6 +67,8 @@ pub fn run() {
             commands::get_data_dir,
             commands::get_library_path,
             commands::set_library_path,
+            commands::get_storage_sizes,
+            commands::empty_trash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
