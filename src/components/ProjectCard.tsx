@@ -1,11 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ProjectSummary } from "../lib/types";
 
-const ASSET_TYPE_LABELS: Record<string, string> = {
-  design: "Design",
-  hueforge: "HueForge",
-  bambulab: "BambuLab",
-};
 
 interface ProjectCardProps {
   project: ProjectSummary;
@@ -120,16 +115,11 @@ export default function ProjectCard({
           ))}
         </div>
 
-        {project.asset_types.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {project.asset_types.map((at) => (
-              <span
-                key={at}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
-              >
-                {ASSET_TYPE_LABELS[at] ?? at}
-              </span>
-            ))}
+        {project.file_count > 0 && (
+          <div className="mt-1.5">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+              {project.file_count} file{project.file_count !== 1 ? "s" : ""}
+            </span>
           </div>
         )}
       </div>

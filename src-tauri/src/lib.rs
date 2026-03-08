@@ -1,4 +1,5 @@
 mod commands;
+mod config;
 mod db;
 mod models;
 mod thumbnails;
@@ -11,7 +12,8 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init());
 
     #[cfg(debug_assertions)]
     {
@@ -47,15 +49,20 @@ pub fn run() {
             commands::delete_collection,
             commands::add_project_to_collection,
             commands::remove_project_from_collection,
-            // Assets & Revisions
-            commands::get_project_assets,
-            commands::import_file,
-            commands::delete_revision,
+            // Files
+            commands::get_project_files,
+            commands::import_files,
+            commands::delete_file,
+            commands::update_file_notes,
+            commands::toggle_file_favorite,
             commands::open_file_in_default_app,
-            commands::update_revision_notes,
-            commands::set_revision_thumbnail,
+            commands::reveal_in_finder,
+            commands::read_text_file,
+            commands::sync_project_files,
             commands::export_data,
             commands::get_data_dir,
+            commands::get_library_path,
+            commands::set_library_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

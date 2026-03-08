@@ -18,7 +18,7 @@ export interface ProjectSummary {
   created_at: string;
   updated_at: string;
   tags: Tag[];
-  asset_types: string[];
+  file_count: number;
 }
 
 export interface Tag {
@@ -46,26 +46,18 @@ export interface CollectionSummary {
   name: string;
 }
 
-export interface Asset {
+export interface ProjectFile {
   id: string;
   project_id: string;
-  asset_type: "design" | "hueforge" | "bambulab";
-  created_at: string;
-  revisions: Revision[];
-}
-
-export interface Revision {
-  id: string;
-  asset_id: string;
-  version_number: number;
   file_path: string;
   original_filename: string;
+  file_size: number;
   notes: string;
   thumbnail_path: string | null;
+  favorited: boolean;
   created_at: string;
 }
 
-export type AssetType = "design" | "hueforge" | "bambulab";
 export type SortBy = "name" | "created_at" | "updated_at";
 export type SortOrder = "asc" | "desc";
 
@@ -73,7 +65,6 @@ export interface ListProjectsRequest {
   search?: string;
   tag_ids?: string[];
   collection_id?: string;
-  asset_types?: string[];
   creator?: string;
   sort_by?: SortBy;
   sort_order?: SortOrder;

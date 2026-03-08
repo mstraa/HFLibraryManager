@@ -5,8 +5,7 @@ import type {
   Tag,
   TagWithCount,
   Collection,
-  Asset,
-  Revision,
+  ProjectFile,
   ListProjectsRequest,
 } from "./types";
 
@@ -90,35 +89,42 @@ export async function removeProjectFromCollection(projectId: string, collectionI
   return invoke("remove_project_from_collection", { projectId, collectionId });
 }
 
-// ── Assets & Revisions ──
+// ── Files ──
 
-export async function getProjectAssets(projectId: string): Promise<Asset[]> {
-  return invoke("get_project_assets", { projectId });
+export async function getProjectFiles(projectId: string): Promise<ProjectFile[]> {
+  return invoke("get_project_files", { projectId });
 }
 
-export async function importFile(
-  projectId: string,
-  assetType: string,
-  sourcePath: string,
-  notes?: string,
-): Promise<Revision> {
-  return invoke("import_file", { projectId, assetType, sourcePath, notes });
+export async function importFiles(projectId: string, sourcePaths: string[]): Promise<ProjectFile[]> {
+  return invoke("import_files", { projectId, sourcePaths });
 }
 
-export async function deleteRevision(revisionId: string): Promise<void> {
-  return invoke("delete_revision", { revisionId });
+export async function deleteFile(fileId: string): Promise<void> {
+  return invoke("delete_file", { fileId });
+}
+
+export async function updateFileNotes(fileId: string, notes: string): Promise<void> {
+  return invoke("update_file_notes", { fileId, notes });
+}
+
+export async function toggleFileFavorite(fileId: string): Promise<boolean> {
+  return invoke("toggle_file_favorite", { fileId });
 }
 
 export async function openFileInDefaultApp(path: string): Promise<void> {
   return invoke("open_file_in_default_app", { path });
 }
 
-export async function updateRevisionNotes(revisionId: string, notes: string): Promise<void> {
-  return invoke("update_revision_notes", { revisionId, notes });
+export async function revealInFinder(path: string): Promise<void> {
+  return invoke("reveal_in_finder", { path });
 }
 
-export async function setRevisionThumbnail(revisionId: string, sourcePath: string): Promise<string> {
-  return invoke("set_revision_thumbnail", { revisionId, sourcePath });
+export async function readTextFile(path: string): Promise<string> {
+  return invoke("read_text_file", { path });
+}
+
+export async function syncProjectFiles(projectId: string): Promise<{ added: number; removed: number }> {
+  return invoke("sync_project_files", { projectId });
 }
 
 // ── Data Management ──
@@ -129,4 +135,14 @@ export async function exportData(): Promise<string> {
 
 export async function getDataDir(): Promise<string> {
   return invoke("get_data_dir");
+}
+
+// ── Library Path ──
+
+export async function getLibraryPath(): Promise<string> {
+  return invoke("get_library_path");
+}
+
+export async function setLibraryPath(path: string, moveData: boolean): Promise<void> {
+  return invoke("set_library_path", { path, moveData });
 }

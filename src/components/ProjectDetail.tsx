@@ -6,7 +6,8 @@ import {
   updateProject,
   deleteProject,
   setProjectThumbnail,
-  getProjectAssets,
+  getProjectFiles,
+  syncProjectFiles,
   setProjectTags,
   listTags,
   listCollections,
@@ -14,13 +15,11 @@ import {
   removeProjectFromCollection,
   listCreators,
 } from "../lib/api";
-import type { Project, Asset, AssetType, TagWithCount, Collection } from "../lib/types";
+import type { Project, ProjectFile, TagWithCount, Collection } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
-import AssetSection from "./AssetSection";
+import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
 import { onDragMouseDown } from "../hooks/useDrag";
-
-const ASSET_TYPES: AssetType[] = ["design", "hueforge", "bambulab"];
 
 interface ProjectDetailProps {
   projectId: string;
@@ -30,7 +29,7 @@ interface ProjectDetailProps {
 
 export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectDetailProps) {
   const [project, setProject] = useState<Project | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [files, setFiles] = useState<ProjectFile[]>([]);
   const [allTags, setAllTags] = useState<TagWithCount[]>([]);
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
   const [editingName, setEditingName] = useState(false);
@@ -39,16 +38,19 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [creators, setCreators] = useState<string[]>([]);
 
-  const loadProject = useCallback(async () => {
-    const [p, a, t, c, cr] = await Promise.all([
+  const loadProject = useCallback(async (sync = false) => {
+    if (sync) {
+      await syncProjectFiles(projectId);
+    }
+    const [p, f, t, c, cr] = await Promise.all([
       getProject(projectId),
-      getProjectAssets(projectId),
+      getProjectFiles(projectId),
       listTags(),
       listCollections(),
       listCreators(),
     ]);
     setProject(p);
-    setAssets(a);
+    setFiles(f);
     setAllTags(t);
     setAllCollections(c);
     setCreators(cr);
@@ -56,7 +58,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
   }, [projectId]);
 
   useEffect(() => {
-    loadProject();
+    loadProject(true);
   }, [loadProject]);
 
   async function handleNameSave() {
@@ -131,10 +133,6 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
     onDeleted();
   }
 
-  function getAssetForType(type: AssetType): Asset | undefined {
-    return assets.find((a) => a.asset_type === type);
-  }
-
   if (!project) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -190,7 +188,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto p-6 space-y-6">
+        <div className="w-[80%] mx-auto p-6 space-y-6">
           {/* Thumbnail + Tags row */}
           <div className="flex gap-6">
             {/* Thumbnail */}
@@ -323,22 +321,16 @@ export default function ProjectDetail({ projectId, onBack, onDeleted }: ProjectD
             />
           </div>
 
-          {/* Asset sections */}
+          {/* Files */}
           <div>
             <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-              Files & Revisions
+              Files
             </h3>
-            <div className="space-y-4">
-              {ASSET_TYPES.map((type) => (
-                <AssetSection
-                  key={type}
-                  assetType={type}
-                  asset={getAssetForType(type)}
-                  projectId={projectId}
-                  onRefresh={loadProject}
-                />
-              ))}
-            </div>
+            <FileList
+              files={files}
+              projectId={projectId}
+              onRefresh={loadProject}
+            />
           </div>
         </div>
       </div>

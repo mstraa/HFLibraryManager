@@ -1,3 +1,4 @@
+use crate::config;
 use crate::db::Database;
 use crate::models::*;
 use crate::thumbnails;
@@ -29,7 +30,7 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
 
     // Create project directory
     let project_dir = Database::data_dir().join("projects").join(&id);
-    for sub in &["design", "hueforge", "bambulab", "thumbnails"] {
+    for sub in &["files", "thumbnails"] {
         fs::create_dir_all(project_dir.join(sub)).map_err(map_err)?;
     }
 
@@ -160,21 +161,6 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         if !creator.is_empty() {
             conditions.push(format!("p.creator = ?{}", param_idx));
             params.push(Box::new(creator.clone()));
-            param_idx += 1;
-        }
-    }
-
-    // Filter by asset types
-    if let Some(asset_types) = &req.asset_types {
-        if !asset_types.is_empty() {
-            for at in asset_types {
-                conditions.push(format!(
-                    "p.id IN (SELECT project_id FROM assets WHERE asset_type = ?{})",
-                    param_idx
-                ));
-                params.push(Box::new(at.clone()));
-                param_idx += 1;
-            }
         }
     }
 
@@ -189,7 +175,9 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
     };
 
     let sql = format!(
-        "SELECT p.id, p.name, p.creator, p.thumbnail_path, p.created_at, p.updated_at FROM projects p WHERE {} ORDER BY {} {}",
+        "SELECT p.id, p.name, p.creator, p.thumbnail_path, p.created_at, p.updated_at,
+                (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) as file_count
+         FROM projects p WHERE {} ORDER BY {} {}",
         conditions.join(" AND "), sort_col, sort_dir
     );
 
@@ -205,7 +193,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
             created_at: row.get(4)?,
             updated_at: row.get(5)?,
             tags: vec![],
-            asset_types: vec![],
+            file_count: row.get(6)?,
         })
     }).map_err(map_err)?;
 
@@ -213,7 +201,6 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
     for row in rows {
         let mut p = row.map_err(map_err)?;
         p.tags = get_project_tags(&conn, &p.id).map_err(map_err)?;
-        p.asset_types = get_project_asset_types(&conn, &p.id).map_err(map_err)?;
         projects.push(p);
     }
 
@@ -379,169 +366,183 @@ pub fn remove_project_from_collection(db: State<Database>, project_id: String, c
     Ok(())
 }
 
-// ── Assets & Revisions ──
+// ── Files ──
 
 #[tauri::command]
-pub fn get_project_assets(db: State<Database>, project_id: String) -> CmdResult<Vec<Asset>> {
+pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<Vec<ProjectFile>> {
     let conn = db.conn.lock().map_err(map_err)?;
 
-    let mut asset_stmt = conn.prepare(
-        "SELECT id, project_id, asset_type, created_at FROM assets WHERE project_id = ?1 ORDER BY asset_type"
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, created_at
+         FROM files WHERE project_id = ?1 ORDER BY created_at DESC"
     ).map_err(map_err)?;
 
-    let assets = asset_stmt.query_map(rusqlite::params![project_id], |row| {
-        Ok(Asset {
+    let rows = stmt.query_map(rusqlite::params![project_id], |row| {
+        Ok(ProjectFile {
             id: row.get(0)?,
             project_id: row.get(1)?,
-            asset_type: row.get(2)?,
-            created_at: row.get(3)?,
-            revisions: vec![],
+            file_path: row.get(2)?,
+            original_filename: row.get(3)?,
+            file_size: row.get(4)?,
+            notes: row.get(5)?,
+            thumbnail_path: row.get(6)?,
+            favorited: row.get::<_, i32>(7)? != 0,
+            created_at: row.get(8)?,
         })
     }).map_err(map_err)?;
 
-    let mut result = Vec::new();
-    for asset in assets {
-        let mut a = asset.map_err(map_err)?;
-        let mut rev_stmt = conn.prepare(
-            "SELECT id, asset_id, version_number, file_path, original_filename, notes, thumbnail_path, created_at
-             FROM revisions WHERE asset_id = ?1 ORDER BY version_number"
-        ).map_err(map_err)?;
-
-        a.revisions = rev_stmt.query_map(rusqlite::params![a.id], |row| {
-            Ok(Revision {
-                id: row.get(0)?,
-                asset_id: row.get(1)?,
-                version_number: row.get(2)?,
-                file_path: row.get(3)?,
-                original_filename: row.get(4)?,
-                notes: row.get(5)?,
-                thumbnail_path: row.get(6)?,
-                created_at: row.get(7)?,
-            })
-        }).map_err(map_err)?
-        .collect::<Result<Vec<_>, _>>().map_err(map_err)?;
-
-        result.push(a);
-    }
-
-    Ok(result)
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
 }
 
 #[tauri::command]
-pub fn import_file(
+pub fn import_files(
     db: State<Database>,
     project_id: String,
-    asset_type: String,
-    source_path: String,
-    notes: Option<String>,
-) -> CmdResult<Revision> {
+    source_paths: Vec<String>,
+) -> CmdResult<Vec<ProjectFile>> {
     let conn = db.conn.lock().map_err(map_err)?;
-
-    // Validate asset type
-    if !["design", "hueforge", "bambulab"].contains(&asset_type.as_str()) {
-        return Err(format!("Invalid asset type: {}", asset_type));
-    }
-
-    // Find or create asset for this project + type
-    let asset_id: String = conn.query_row(
-        "SELECT id FROM assets WHERE project_id = ?1 AND asset_type = ?2",
-        rusqlite::params![project_id, asset_type],
-        |row| row.get(0),
-    ).unwrap_or_else(|_| {
-        let new_id = Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-        conn.execute(
-            "INSERT INTO assets (id, project_id, asset_type, created_at) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![new_id, project_id, asset_type, now],
-        ).expect("Failed to create asset");
-        new_id
-    });
-
-    // Get next version number
-    let next_version: i32 = conn.query_row(
-        "SELECT COALESCE(MAX(version_number), 0) + 1 FROM revisions WHERE asset_id = ?1",
-        rusqlite::params![asset_id],
-        |row| row.get(0),
-    ).map_err(map_err)?;
-
-    // Copy file to managed storage
-    let source = std::path::Path::new(&source_path);
-    let original_filename = source.file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let dest_dir = Database::data_dir()
+    let files_dir = Database::data_dir()
         .join("projects")
         .join(&project_id)
-        .join(&asset_type)
-        .join(format!("v{}", next_version));
-    fs::create_dir_all(&dest_dir).map_err(map_err)?;
+        .join("files");
+    fs::create_dir_all(&files_dir).map_err(map_err)?;
 
-    let dest_path = dest_dir.join(&original_filename);
-    fs::copy(&source_path, &dest_path).map_err(map_err)?;
+    let thumb_dir = Database::data_dir()
+        .join("projects")
+        .join(&project_id)
+        .join("thumbnails");
 
-    // Insert revision
-    let rev_id = Uuid::new_v4().to_string();
+    let mut result = Vec::new();
     let now = Utc::now().to_rfc3339();
-    let dest_path_str = dest_path.to_string_lossy().to_string();
 
-    let notes_str = notes.unwrap_or_default();
+    for source_path in &source_paths {
+        let source = Path::new(source_path);
+        let original_filename = source.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
 
-    // Auto-extract thumbnail for 3mf files
-    let thumb_path = if asset_type == "bambulab" {
-        let thumb_dir = Database::data_dir()
-            .join("projects")
-            .join(&project_id)
-            .join("thumbnails");
-        thumbnails::extract_3mf_thumbnail(Path::new(&dest_path))
-            .and_then(|bytes| {
-                thumbnails::generate_thumbnail(
-                    &bytes,
-                    &thumb_dir,
-                    &format!("rev_{}.png", rev_id),
-                )
-            })
-            .map(|p| p.to_string_lossy().to_string())
-    } else {
-        None
-    };
+        // Keep original filename, add suffix if duplicate
+        let mut dest_path = files_dir.join(&original_filename);
+        if dest_path.exists() {
+            let stem = source.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let ext = source.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let mut counter = 1;
+            loop {
+                dest_path = files_dir.join(format!("{} ({}){}", stem, counter, ext));
+                if !dest_path.exists() { break; }
+                counter += 1;
+            }
+        }
 
-    conn.execute(
-        "INSERT INTO revisions (id, asset_id, version_number, file_path, original_filename, notes, thumbnail_path, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![rev_id, asset_id, next_version, dest_path_str, original_filename, notes_str, thumb_path, now],
-    ).map_err(map_err)?;
+        let file_size = fs::metadata(source).map(|m| m.len() as i64).unwrap_or(0);
+        fs::copy(source_path, &dest_path).map_err(map_err)?;
+
+        let file_id = Uuid::new_v4().to_string();
+        let dest_str = dest_path.to_string_lossy().to_string();
+        let stored_filename = dest_path.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or(original_filename.clone());
+
+        // Auto-extract thumbnail for 3mf files
+        let thumb_path = if original_filename.to_lowercase().ends_with(".3mf") {
+            thumbnails::extract_3mf_thumbnail(&dest_path)
+                .and_then(|bytes| {
+                    thumbnails::generate_thumbnail(
+                        &bytes,
+                        &thumb_dir,
+                        &format!("file_{}.png", file_id),
+                    )
+                })
+                .map(|p| p.to_string_lossy().to_string())
+        } else {
+            None
+        };
+
+        conn.execute(
+            "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![file_id, project_id, dest_str, stored_filename, file_size, "", thumb_path, now],
+        ).map_err(map_err)?;
+
+        // Auto-set project thumbnail from first 3mf if none set
+        if thumb_path.is_some() {
+            let has_thumb: bool = conn.query_row(
+                "SELECT thumbnail_path IS NOT NULL FROM projects WHERE id = ?1",
+                rusqlite::params![project_id],
+                |row| row.get(0),
+            ).unwrap_or(false);
+            if !has_thumb {
+                conn.execute(
+                    "UPDATE projects SET thumbnail_path = ?1 WHERE id = ?2",
+                    rusqlite::params![thumb_path, project_id],
+                ).map_err(map_err)?;
+            }
+        }
+
+        result.push(ProjectFile {
+            id: file_id,
+            project_id: project_id.clone(),
+            file_path: dest_str,
+            original_filename: stored_filename,
+            file_size,
+            notes: String::new(),
+            thumbnail_path: thumb_path,
+            favorited: false,
+            created_at: now.clone(),
+        });
+    }
 
     // Update project timestamp
     conn.execute("UPDATE projects SET updated_at = ?1 WHERE id = ?2",
         rusqlite::params![now, project_id]).map_err(map_err)?;
 
-    // If this is the first file and project has no thumbnail, auto-set it
-    if thumb_path.is_some() {
-        let has_thumb: bool = conn.query_row(
-            "SELECT thumbnail_path IS NOT NULL FROM projects WHERE id = ?1",
-            rusqlite::params![project_id],
-            |row| row.get(0),
-        ).unwrap_or(false);
+    Ok(result)
+}
 
-        if !has_thumb {
-            conn.execute(
-                "UPDATE projects SET thumbnail_path = ?1 WHERE id = ?2",
-                rusqlite::params![thumb_path, project_id],
-            ).map_err(map_err)?;
-        }
+#[tauri::command]
+pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
+    let conn = db.conn.lock().map_err(map_err)?;
+
+    let file_path: String = conn.query_row(
+        "SELECT file_path FROM files WHERE id = ?1",
+        rusqlite::params![file_id],
+        |row| row.get(0),
+    ).map_err(map_err)?;
+
+    conn.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![file_id]).map_err(map_err)?;
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        fs::remove_file(path).ok();
     }
 
-    Ok(Revision {
-        id: rev_id,
-        asset_id,
-        version_number: next_version,
-        file_path: dest_path_str,
-        original_filename,
-        notes: notes_str,
-        thumbnail_path: thumb_path,
-        created_at: now,
-    })
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) -> CmdResult<()> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    conn.execute(
+        "UPDATE files SET notes = ?1 WHERE id = ?2",
+        rusqlite::params![notes, file_id],
+    ).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<bool> {
+    let conn = db.conn.lock().map_err(map_err)?;
+    let current: i32 = conn.query_row(
+        "SELECT favorited FROM files WHERE id = ?1",
+        rusqlite::params![file_id],
+        |row| row.get(0),
+    ).map_err(map_err)?;
+    let new_val = if current != 0 { 0 } else { 1 };
+    conn.execute(
+        "UPDATE files SET favorited = ?1 WHERE id = ?2",
+        rusqlite::params![new_val, file_id],
+    ).map_err(map_err)?;
+    Ok(new_val != 0)
 }
 
 #[tauri::command]
@@ -566,58 +567,6 @@ pub fn set_project_thumbnail(db: State<Database>, project_id: String, source_pat
     Ok(dest_str)
 }
 
-#[tauri::command]
-pub fn set_revision_thumbnail(db: State<Database>, revision_id: String, source_path: String) -> CmdResult<String> {
-    let conn = db.conn.lock().map_err(map_err)?;
-
-    // Get project_id for the revision
-    let project_id: String = conn.query_row(
-        "SELECT a.project_id FROM revisions r JOIN assets a ON r.asset_id = a.id WHERE r.id = ?1",
-        rusqlite::params![revision_id],
-        |row| row.get(0),
-    ).map_err(map_err)?;
-
-    let dest_dir = Database::data_dir().join("projects").join(&project_id).join("thumbnails");
-
-    let dest_path = thumbnails::generate_thumbnail_from_file(
-        Path::new(&source_path),
-        &dest_dir,
-        &format!("rev_{}.png", revision_id),
-    ).ok_or_else(|| "Failed to generate thumbnail from image".to_string())?;
-
-    let dest_str = dest_path.to_string_lossy().to_string();
-    conn.execute(
-        "UPDATE revisions SET thumbnail_path = ?1 WHERE id = ?2",
-        rusqlite::params![dest_str, revision_id],
-    ).map_err(map_err)?;
-
-    Ok(dest_str)
-}
-
-#[tauri::command]
-pub fn delete_revision(db: State<Database>, revision_id: String) -> CmdResult<()> {
-    let conn = db.conn.lock().map_err(map_err)?;
-
-    // Get file path before deleting
-    let file_path: String = conn.query_row(
-        "SELECT file_path FROM revisions WHERE id = ?1",
-        rusqlite::params![revision_id],
-        |row| row.get(0),
-    ).map_err(map_err)?;
-
-    conn.execute("DELETE FROM revisions WHERE id = ?1", rusqlite::params![revision_id]).map_err(map_err)?;
-
-    // Remove file and parent version directory
-    let path = std::path::Path::new(&file_path);
-    if path.exists() {
-        if let Some(parent) = path.parent() {
-            fs::remove_dir_all(parent).ok();
-        }
-    }
-
-    Ok(())
-}
-
 // ── File Operations ──
 
 #[tauri::command]
@@ -626,13 +575,92 @@ pub fn open_file_in_default_app(path: String) -> CmdResult<()> {
 }
 
 #[tauri::command]
-pub fn update_revision_notes(db: State<Database>, revision_id: String, notes: String) -> CmdResult<()> {
+pub fn reveal_in_finder(path: String) -> CmdResult<()> {
+    let p = Path::new(&path);
+    let folder = if p.is_file() { p.parent().unwrap_or(p) } else { p };
+    open::that(folder).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn read_text_file(path: String) -> CmdResult<String> {
+    fs::read_to_string(&path).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<SyncResult> {
     let conn = db.conn.lock().map_err(map_err)?;
-    conn.execute(
-        "UPDATE revisions SET notes = ?1 WHERE id = ?2",
-        rusqlite::params![notes, revision_id],
+    let files_dir = Database::data_dir()
+        .join("projects")
+        .join(&project_id)
+        .join("files");
+    fs::create_dir_all(&files_dir).map_err(map_err)?;
+
+    let thumb_dir = Database::data_dir()
+        .join("projects")
+        .join(&project_id)
+        .join("thumbnails");
+
+    let mut removed = 0i32;
+    let mut added = 0i32;
+
+    // 1. Remove DB entries whose files no longer exist on disk
+    let mut stmt = conn.prepare(
+        "SELECT id, file_path FROM files WHERE project_id = ?1"
     ).map_err(map_err)?;
-    Ok(())
+    let existing: Vec<(String, String)> = stmt.query_map(rusqlite::params![project_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(map_err)?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    for (file_id, file_path) in &existing {
+        if !Path::new(file_path).exists() {
+            conn.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![file_id]).map_err(map_err)?;
+            removed += 1;
+        }
+    }
+
+    // 2. Add files on disk that aren't tracked in DB
+    let tracked_filenames: std::collections::HashSet<String> = existing.iter()
+        .filter(|(_, fp)| Path::new(fp).exists())
+        .filter_map(|(_, fp)| Path::new(fp).file_name().map(|f| f.to_string_lossy().to_string()))
+        .collect();
+
+    if files_dir.exists() {
+        let now = Utc::now().to_rfc3339();
+        for entry in fs::read_dir(&files_dir).map_err(map_err)?.flatten() {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+            let filename = path.file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if filename.starts_with('.') { continue; }
+            if tracked_filenames.contains(&filename) { continue; }
+
+            let file_size = fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0);
+            let file_id = Uuid::new_v4().to_string();
+            let file_path_str = path.to_string_lossy().to_string();
+
+            let thumb_path = if filename.to_lowercase().ends_with(".3mf") {
+                thumbnails::extract_3mf_thumbnail(&path)
+                    .and_then(|bytes| {
+                        thumbnails::generate_thumbnail(&bytes, &thumb_dir, &format!("file_{}.png", file_id))
+                    })
+                    .map(|p| p.to_string_lossy().to_string())
+            } else {
+                None
+            };
+
+            conn.execute(
+                "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![file_id, project_id, file_path_str, filename, file_size, "", thumb_path, now],
+            ).map_err(map_err)?;
+            added += 1;
+        }
+    }
+
+    Ok(SyncResult { added, removed })
 }
 
 // ── Creators ──
@@ -723,6 +751,48 @@ pub fn get_data_dir() -> String {
     Database::data_dir().to_string_lossy().to_string()
 }
 
+// ── Library Path ──
+
+#[tauri::command]
+pub fn get_library_path() -> String {
+    config::library_path().to_string_lossy().to_string()
+}
+
+#[tauri::command]
+pub fn set_library_path(path: String, move_data: bool) -> CmdResult<()> {
+    let old_path = config::library_path();
+    let new_path = std::path::PathBuf::from(&path);
+
+    // Create the new directory
+    fs::create_dir_all(&new_path).map_err(map_err)?;
+
+    // Move existing data if requested
+    if move_data && old_path.exists() && old_path != new_path {
+        let old_projects = old_path.join("projects");
+        let new_projects = new_path.join("projects");
+        if old_projects.exists() && !new_projects.exists() {
+            fs::rename(&old_projects, &new_projects).map_err(map_err)?;
+        }
+
+        let old_db = old_path.join("db.sqlite");
+        let new_db = new_path.join("db.sqlite");
+        if old_db.exists() && !new_db.exists() {
+            fs::copy(&old_db, &new_db).map_err(map_err)?;
+        }
+        // Also copy WAL/SHM files if they exist
+        for ext in &["db.sqlite-wal", "db.sqlite-shm"] {
+            let old_f = old_path.join(ext);
+            let new_f = new_path.join(ext);
+            if old_f.exists() {
+                let _ = fs::copy(&old_f, &new_f);
+            }
+        }
+    }
+
+    config::set_library_path(path)?;
+    Ok(())
+}
+
 // ── Helpers ──
 
 fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rusqlite::Error> {
@@ -746,14 +816,6 @@ fn get_project_collections(conn: &Connection, project_id: &str) -> Result<Vec<Co
     let rows = stmt.query_map(rusqlite::params![project_id], |row| {
         Ok(CollectionSummary { id: row.get(0)?, name: row.get(1)? })
     })?;
-    rows.collect()
-}
-
-fn get_project_asset_types(conn: &Connection, project_id: &str) -> Result<Vec<String>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT asset_type FROM assets WHERE project_id = ?1 ORDER BY asset_type"
-    )?;
-    let rows = stmt.query_map(rusqlite::params![project_id], |row| row.get(0))?;
     rows.collect()
 }
 

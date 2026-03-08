@@ -22,7 +22,7 @@ pub struct ProjectSummary {
     pub created_at: String,
     pub updated_at: String,
     pub tags: Vec<Tag>,
-    pub asset_types: Vec<String>,
+    pub file_count: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -58,24 +58,22 @@ pub struct CollectionSummary {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Asset {
+pub struct ProjectFile {
     pub id: String,
     pub project_id: String,
-    pub asset_type: String,
+    pub file_path: String,
+    pub original_filename: String,
+    pub file_size: i64,
+    pub notes: String,
+    pub thumbnail_path: Option<String>,
+    pub favorited: bool,
     pub created_at: String,
-    pub revisions: Vec<Revision>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Revision {
-    pub id: String,
-    pub asset_id: String,
-    pub version_number: i32,
-    pub file_path: String,
-    pub original_filename: String,
-    pub notes: String,
-    pub thumbnail_path: Option<String>,
-    pub created_at: String,
+pub struct SyncResult {
+    pub added: i32,
+    pub removed: i32,
 }
 
 // Request types
@@ -122,7 +120,6 @@ pub struct ListProjectsRequest {
     pub search: Option<String>,
     pub tag_ids: Option<Vec<String>>,
     pub collection_id: Option<String>,
-    pub asset_types: Option<Vec<String>>,
     pub creator: Option<String>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,

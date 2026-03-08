@@ -17,7 +17,6 @@ function App() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | undefined>();
-  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [selectedCreator, setSelectedCreator] = useState<string | undefined>();
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -32,13 +31,12 @@ function App() {
       search: search || undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       collection_id: selectedCollection,
-      asset_types: selectedAssetTypes.length > 0 ? selectedAssetTypes : undefined,
       creator: selectedCreator,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, selectedCollection, selectedAssetTypes, selectedCreator, sortBy, sortOrder]);
+  }, [search, selectedTags, selectedCollection, selectedCreator, sortBy, sortOrder]);
 
   // Reload when filters change (debounce search)
   useEffect(() => {
@@ -118,8 +116,6 @@ function App() {
         onTagsChange={setSelectedTags}
         selectedCollection={selectedCollection}
         onCollectionChange={setSelectedCollection}
-        selectedAssetTypes={selectedAssetTypes}
-        onAssetTypesChange={setSelectedAssetTypes}
         selectedCreator={selectedCreator}
         onCreatorChange={setSelectedCreator}
         onCreateProject={() => setShowCreate(true)}

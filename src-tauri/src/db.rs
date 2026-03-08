@@ -1,3 +1,4 @@
+use crate::config;
 use rusqlite::{Connection, Result};
 use std::fs;
 use std::path::PathBuf;
@@ -22,9 +23,7 @@ impl Database {
     }
 
     pub fn data_dir() -> PathBuf {
-        dirs::home_dir()
-            .expect("Could not find home directory")
-            .join("3dPrintManager")
+        config::library_path()
     }
 
     fn db_path() -> PathBuf {
@@ -100,6 +99,18 @@ impl Database {
                 UNIQUE(asset_id, version_number)
             );
 
+            CREATE TABLE IF NOT EXISTS files (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                file_size INTEGER NOT NULL DEFAULT 0,
+                notes TEXT NOT NULL DEFAULT '',
+                thumbnail_path TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE VIRTUAL TABLE IF NOT EXISTS projects_fts USING fts5(
                 name,
                 description,
@@ -158,6 +169,42 @@ impl Database {
                 DROP TABLE assets;
                 ALTER TABLE assets_new RENAME TO assets;
                 "
+            )?;
+        }
+
+        // Migration: migrate revisions to files table
+        let has_files_table: bool = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='files'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if has_files_table {
+            let needs_migration: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM revisions) AND NOT EXISTS(SELECT 1 FROM files)",
+                [],
+                |row| row.get(0),
+            ).unwrap_or(false);
+
+            if needs_migration {
+                conn.execute_batch(
+                    "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, created_at)
+                     SELECT r.id, a.project_id, r.file_path, r.original_filename, 0, r.notes, r.thumbnail_path, r.created_at
+                     FROM revisions r JOIN assets a ON r.asset_id = a.id;"
+                )?;
+            }
+        }
+
+        // Migration: add favorited column to files
+        let has_favorited: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'favorited'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if !has_favorited {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN favorited INTEGER NOT NULL DEFAULT 0;"
             )?;
         }
 
