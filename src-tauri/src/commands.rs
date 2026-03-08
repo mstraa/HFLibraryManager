@@ -971,6 +971,30 @@ pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<
         }
     }
 
+    // 3. Re-parse metadata for favorited hfp/txt files (in case parsing logic changed)
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, file_path, original_filename FROM files WHERE project_id = ?1 AND favorited = 1"
+        ).map_err(map_err)?;
+        let favorited: Vec<(String, String, String)> = stmt.query_map(rusqlite::params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        }).map_err(map_err)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        for (file_id, file_path, filename) in &favorited {
+            let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+            if ext == "hfp" || ext == "txt" {
+                let metadata = parse_file_metadata(file_path, filename);
+                let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
+                conn.execute(
+                    "UPDATE files SET metadata = ?1 WHERE id = ?2",
+                    rusqlite::params![metadata_json, file_id],
+                ).map_err(map_err)?;
+            }
+        }
+    }
+
     Ok(SyncResult { added, removed })
 }
 
