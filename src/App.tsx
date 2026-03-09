@@ -100,6 +100,7 @@ function App() {
             const ext = f.original_filename.split(".").pop()?.toLowerCase() ?? "";
             let category: string | null = null;
             if (ext === "hfp") category = "hfp";
+            else if (ext === "3mf") category = "3mf";
             else if (ext === "stl") category = "stl";
             else if (ext === "txt") category = "txt";
             else if (DESIGN_EXTS.has(ext)) category = "design";
@@ -219,13 +220,13 @@ function App() {
   useKeyboard(keyBindings);
   useSwipeNavigation(navigateBack, navigateForward);
 
-  // Handle folder drop to create project
+  // Handle folder drop to create project(s)
   const handleFolderDrop = useCallback(async (paths: string[]) => {
     if (activeProjectId) return; // Only on library view
-    // Take the first path — expect it to be a folder
-    const folderPath = paths[0];
-    const folderName = folderPath.split("/").pop() || "Untitled";
-    await handleCreate(folderName, "", folderPath, false);
+    for (const folderPath of paths) {
+      const folderName = folderPath.split("/").pop() || "Untitled";
+      await handleCreate(folderName, "", folderPath, false);
+    }
   }, [activeProjectId]);
 
   const { isDragging } = useFileDrop(handleFolderDrop);
