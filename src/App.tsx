@@ -12,6 +12,7 @@ import Settings from "./components/Settings";
 import Welcome from "./components/Welcome";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useFileDrop } from "./hooks/useFileDrop";
+import { useSwipeNavigation } from "./hooks/useSwipeNavigation";
 import "./App.css";
 
 function App() {
@@ -214,6 +215,7 @@ function App() {
   ], [projects, selectedProjectIds.length, showCreate]);
 
   useKeyboard(keyBindings);
+  useSwipeNavigation(navigateBack, navigateForward);
 
   // Handle folder drop to create project
   const handleFolderDrop = useCallback(async (paths: string[]) => {
