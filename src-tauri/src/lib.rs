@@ -40,6 +40,9 @@ pub fn run() {
             // Filament & Size filters
             commands::list_all_filaments,
             commands::list_all_sizes,
+            commands::list_all_filaments_raw,
+            commands::get_filament_substitutions,
+            commands::set_filament_substitution,
             // Collections
             commands::create_collection,
             commands::list_collections,

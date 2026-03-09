@@ -9,6 +9,7 @@ import type { ThumbnailMode } from "../lib/types";
 interface SettingsProps {
   onBack: () => void;
   onLibraryChanged: () => void;
+  onOpenFilamentManager: () => void;
 }
 
 interface LibraryEntry {
@@ -24,7 +25,7 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
-export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
+export default function Settings({ onBack, onLibraryChanged, onOpenFilamentManager }: SettingsProps) {
   const [libraries, setLibraries] = useState<LibraryEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [editingName, setEditingName] = useState<number | null>(null);
@@ -222,6 +223,23 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
                 );
               })}
             </div>
+          </div>
+
+          {/* Filament Management */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">Filaments</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Merge duplicate filaments across your libraries.
+            </p>
+            <button
+              onClick={onOpenFilamentManager}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+              </svg>
+              Manage Filaments
+            </button>
           </div>
 
           {/* Appearance */}

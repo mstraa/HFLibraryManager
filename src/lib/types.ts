@@ -17,7 +17,7 @@ export interface ProjectSummary {
   updated_at: string;
   tags: Tag[];
   file_count: number;
-  filaments: FilamentInfo[];
+  filaments: ResolvedFilament[];
   size: string | null;
 }
 
@@ -50,6 +50,22 @@ export interface FilamentInfo {
   color: string;
   name: string;
   brand: string;
+}
+
+export interface ResolvedFilament {
+  current: FilamentInfo;
+  original: FilamentInfo | null;  // non-null if this was substituted
+}
+
+export interface FilamentSubstitution {
+  from_key: string;
+  from: FilamentInfo;
+  to_key: string;
+  to: FilamentInfo;
+}
+
+export function filamentKey(f: FilamentInfo): string {
+  return `${f.color.toLowerCase()}|${f.brand}|${f.name}`;
 }
 
 export interface FileMetadata {

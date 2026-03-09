@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ProjectSummary } from "../lib/types";
+import { filamentKey } from "../lib/types";
 
 interface ProjectTableProps {
   projects: ProjectSummary[];
@@ -165,16 +166,16 @@ export default function ProjectTable({
                 <td className="px-3 py-2">
                   {project.filaments.length > 0 && (
                     <div className="flex gap-1">
-                      {project.filaments.map((f) => (
+                      {project.filaments.map((rf) => (
                         <button
-                          key={f.color}
+                          key={filamentKey(rf.current)}
                           onClick={(e) => {
                             e.stopPropagation();
-                            onFilamentClick?.(f.color.toLowerCase());
+                            onFilamentClick?.(filamentKey(rf.current));
                           }}
                           className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 cursor-pointer hover:scale-125 transition-transform"
-                          style={{ backgroundColor: f.color }}
-                          title={`${f.brand} ${f.name} (${f.color})`}
+                          style={{ backgroundColor: rf.current.color }}
+                          title={`${rf.current.brand} ${rf.current.name} (${rf.current.color})`}
                         />
                       ))}
                     </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listTags, listCollections, listAllFilaments, listAllSizes } from "../lib/api";
 import type { TagWithCount, Collection, FilamentInfo } from "../lib/types";
+import { filamentKey } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
 import { onDragMouseDown } from "../hooks/useDrag";
@@ -386,7 +387,7 @@ export default function Sidebar({
                   </button>
                 </li>
                 {filaments.map((f) => {
-                  const key = f.color.toLowerCase();
+                  const key = filamentKey(f);
                   const isActive = selectedFilaments.includes(key);
                   const isExcluded = excludedFilaments.includes(key);
                   return (

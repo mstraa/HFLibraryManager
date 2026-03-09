@@ -7,6 +7,7 @@ import type {
   Collection,
   ProjectFile,
   FilamentInfo,
+  FilamentSubstitution,
   ListProjectsRequest,
 } from "./types";
 
@@ -70,6 +71,18 @@ export async function listAllFilaments(): Promise<FilamentInfo[]> {
 
 export async function listAllSizes(): Promise<string[]> {
   return invoke("list_all_sizes");
+}
+
+export async function listAllFilamentsRaw(): Promise<FilamentInfo[]> {
+  return invoke("list_all_filaments_raw");
+}
+
+export async function getFilamentSubstitutions(): Promise<FilamentSubstitution[]> {
+  return invoke("get_filament_substitutions");
+}
+
+export async function setFilamentSubstitution(fromKey: string, toKey: string | null): Promise<void> {
+  return invoke("set_filament_substitution", { fromKey, toKey });
 }
 
 // ── Collections ──

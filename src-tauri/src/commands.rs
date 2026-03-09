@@ -291,16 +291,30 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Filter by filaments (format: ["#hexcolor", ...]) — AND logic, match by hex color
+    // Filter by filaments (format: ["color|brand|name", ...]) — AND logic, match by full key
+    // Also expands to include substituted filaments that resolve to the target
     if let Some(filaments) = &req.filaments {
+        let subs = config::get_substitutions();
+        let reverse_map = config::build_reverse_substitution_map(&subs);
         for filament in filaments {
+            // Collect all keys that should match: the target itself + any sources that resolve to it
+            let mut match_keys = vec![filament.clone()];
+            if let Some(sources) = reverse_map.get(filament) {
+                match_keys.extend(sources.clone());
+            }
+            let placeholders: Vec<String> = match_keys.iter().enumerate()
+                .map(|(i, _)| format!("?{}", param_idx + i))
+                .collect();
             conditions.push(format!(
                 "p.id IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
-                 WHERE f.favorited = 1 AND LOWER(json_extract(je.value, '$.color')) = ?{})",
-                param_idx
+                 WHERE f.favorited = 1 AND (LOWER(json_extract(je.value, '$.color')) || '|' || \
+                 json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name')) IN ({}))",
+                placeholders.join(", ")
             ));
-            params.push(Box::new(filament.to_lowercase()));
-            param_idx += 1;
+            for key in &match_keys {
+                params.push(Box::new(key.clone()));
+                param_idx += 1;
+            }
         }
     }
 
@@ -331,16 +345,28 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Exclude filaments
+    // Exclude filaments (also excludes substituted sources)
     if let Some(exclude_filaments) = &req.exclude_filaments {
+        let subs = config::get_substitutions();
+        let reverse_map = config::build_reverse_substitution_map(&subs);
         for filament in exclude_filaments {
+            let mut match_keys = vec![filament.clone()];
+            if let Some(sources) = reverse_map.get(filament) {
+                match_keys.extend(sources.clone());
+            }
+            let placeholders: Vec<String> = match_keys.iter().enumerate()
+                .map(|(i, _)| format!("?{}", param_idx + i))
+                .collect();
             conditions.push(format!(
                 "p.id NOT IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
-                 WHERE f.favorited = 1 AND LOWER(json_extract(je.value, '$.color')) = ?{})",
-                param_idx
+                 WHERE f.favorited = 1 AND (LOWER(json_extract(je.value, '$.color')) || '|' || \
+                 json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name')) IN ({}))",
+                placeholders.join(", ")
             ));
-            params.push(Box::new(filament.to_lowercase()));
-            param_idx += 1;
+            for key in &match_keys {
+                params.push(Box::new(key.clone()));
+                param_idx += 1;
+            }
         }
     }
 
@@ -1292,15 +1318,24 @@ pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
          ORDER BY brand, name"
     ).map_err(map_err)?;
 
-    let rows = stmt.query_map([], |row| {
+    let raw: Vec<FilamentInfo> = stmt.query_map([], |row| {
         Ok(FilamentInfo {
             color: row.get(0)?,
             name: row.get(1)?,
             brand: row.get(2)?,
         })
-    }).map_err(map_err)?;
+    }).map_err(map_err)?.collect::<Result<Vec<_>, _>>().map_err(map_err)?;
 
-    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+    // Filter out filaments that are sources of substitutions (they're merged into targets)
+    let subs = config::get_substitutions();
+    let filtered: Vec<FilamentInfo> = raw.into_iter()
+        .filter(|f| {
+            let key = config::filament_key(&f.color, &f.brand, &f.name);
+            !subs.contains_key(&key)
+        })
+        .collect();
+
+    Ok(filtered)
 }
 
 #[tauri::command]
@@ -1319,6 +1354,67 @@ pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
     ).map_err(map_err)?;
 
     let rows = stmt.query_map([], |row| row.get(0)).map_err(map_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+}
+
+// ── Filament Substitutions ──
+
+#[tauri::command]
+pub fn get_filament_substitutions() -> CmdResult<Vec<FilamentSubstitution>> {
+    let subs = config::get_substitutions();
+    let mut result = Vec::new();
+    for (from_key, _) in &subs {
+        let resolved_key = config::resolve_filament_key(from_key, &subs);
+        let (fc, fb, fn_) = config::parse_filament_key(from_key);
+        let (tc, tb, tn) = config::parse_filament_key(&resolved_key);
+        result.push(FilamentSubstitution {
+            from_key: from_key.clone(),
+            from: FilamentInfo { color: fc, name: fn_, brand: fb },
+            to_key: resolved_key,
+            to: FilamentInfo { color: tc, name: tn, brand: tb },
+        });
+    }
+    result.sort_by(|a, b| (&a.from.brand, &a.from.name).cmp(&(&b.from.brand, &b.from.name)));
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn set_filament_substitution(from_key: String, to_key: Option<String>) -> CmdResult<()> {
+    config::set_substitution(from_key, to_key)
+}
+
+/// List all unique filaments from the active library (raw, without substitution filtering).
+/// Used by the filament management UI to show all available filaments.
+#[tauri::command]
+pub fn list_all_filaments_raw(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT color, name, brand FROM (
+            SELECT
+                json_extract(je.value, '$.color') as color,
+                json_extract(je.value, '$.name') as name,
+                json_extract(je.value, '$.brand') as brand,
+                ROW_NUMBER() OVER (PARTITION BY
+                    CASE WHEN COALESCE(json_extract(je.value, '$.color'), '') = ''
+                        THEN LOWER(json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name'))
+                        ELSE LOWER(json_extract(je.value, '$.color'))
+                    END
+                    ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
+            FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
+            WHERE files.favorited = 1
+              AND json_extract(files.metadata, '$.filaments') IS NOT NULL
+         ) WHERE rn = 1
+         ORDER BY brand, name"
+    ).map_err(map_err)?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(FilamentInfo {
+            color: row.get(0)?,
+            name: row.get(1)?,
+            brand: row.get(2)?,
+        })
+    }).map_err(map_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
 }
 
@@ -1562,7 +1658,7 @@ fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rus
     rows.collect()
 }
 
-fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<FilamentInfo>, rusqlite::Error> {
+fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<ResolvedFilament>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT color, name, brand FROM (
             SELECT
@@ -1581,10 +1677,39 @@ fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<Fila
         ) WHERE rn = 1
         ORDER BY brand, name"
     )?;
-    let rows = stmt.query_map(rusqlite::params![project_id], |row| {
+    let raw_filaments: Vec<FilamentInfo> = stmt.query_map(rusqlite::params![project_id], |row| {
         Ok(FilamentInfo { color: row.get(0)?, name: row.get(1)?, brand: row.get(2)? })
-    })?;
-    rows.collect()
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    let subs = config::get_substitutions();
+    let mut result = Vec::new();
+    let mut seen_keys = std::collections::HashSet::new();
+
+    for f in raw_filaments {
+        let key = config::filament_key(&f.color, &f.brand, &f.name);
+        let resolved_key = config::resolve_filament_key(&key, &subs);
+
+        if resolved_key != key {
+            // This filament has been substituted
+            let (color, brand, name) = config::parse_filament_key(&resolved_key);
+            let dedup_key = resolved_key.clone();
+            if seen_keys.contains(&dedup_key) { continue; }
+            seen_keys.insert(dedup_key);
+            result.push(ResolvedFilament {
+                current: FilamentInfo { color, name, brand },
+                original: Some(f),
+            });
+        } else {
+            if seen_keys.contains(&key) { continue; }
+            seen_keys.insert(key);
+            result.push(ResolvedFilament {
+                current: f,
+                original: None,
+            });
+        }
+    }
+
+    Ok(result)
 }
 
 fn get_project_size(conn: &Connection, project_id: &str) -> Result<Option<String>, rusqlite::Error> {

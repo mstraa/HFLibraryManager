@@ -13,6 +13,7 @@ import {
   setProjectTags,
   listTags,
   listCollections,
+  getFilamentSubstitutions,
   addProjectToCollection,
   removeProjectFromCollection,
   openFileWithApp,
@@ -21,7 +22,8 @@ import {
   createTag,
   createCollection,
 } from "../lib/api";
-import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, FilamentInfo } from "../lib/types";
+import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, FilamentInfo, ResolvedFilament } from "../lib/types";
+import { filamentKey } from "../lib/types";
 import MarkdownEditor from "./MarkdownEditor";
 import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
@@ -224,18 +226,39 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     })
     .filter(m => m.filaments || m.width_mm || m.height_mm);
 
-  // Collect unique filaments across all favorited files (prefer longest name per hex)
-  const filamentMap = new Map<string, FilamentInfo>();
-  for (const m of favoritedMeta) {
-    for (const f of m.filaments ?? []) {
-      const key = f.color ? f.color.toLowerCase() : `${f.brand}|${f.name}`.toLowerCase();
-      const existing = filamentMap.get(key);
-      if (!existing || f.name.length > existing.name.length) {
-        filamentMap.set(key, f);
+  // Collect unique filaments and apply substitutions
+  const [substitutions, setSubstitutions] = useState<Map<string, FilamentInfo>>(new Map());
+  useEffect(() => {
+    getFilamentSubstitutions().then(subs => {
+      const map = new Map<string, FilamentInfo>();
+      for (const s of subs) {
+        map.set(s.from_key, s.to);
+      }
+      setSubstitutions(map);
+    }).catch(() => {});
+  }, []);
+
+  const allFilaments: ResolvedFilament[] = (() => {
+    const seen = new Map<string, ResolvedFilament>();
+    for (const m of favoritedMeta) {
+      for (const f of m.filaments ?? []) {
+        const key = filamentKey(f);
+        const sub = substitutions.get(key);
+        if (sub) {
+          const resolvedKey = filamentKey(sub);
+          if (!seen.has(resolvedKey)) {
+            seen.set(resolvedKey, { current: sub, original: f });
+          }
+        } else {
+          const existing = seen.get(key);
+          if (!existing || f.name.length > existing.current.name.length) {
+            seen.set(key, { current: f, original: null });
+          }
+        }
       }
     }
-  }
-  const allFilaments = Array.from(filamentMap.values());
+    return Array.from(seen.values());
+  })();
 
   // Get dimensions from first file that has them
   const dimsSource = favoritedMeta.find(m => m.width_mm || m.height_mm);
@@ -558,7 +581,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                       </h3>
                       {onFilterByFilaments && allFilaments.length > 1 && (
                         <button
-                          onClick={() => onFilterByFilaments(allFilaments.map(f => f.color.toLowerCase()))}
+                          onClick={() => onFilterByFilaments(allFilaments.map(rf => filamentKey(rf.current)))}
                           className="text-[10px] px-1.5 py-0.5 rounded border border-indigo-300 dark:border-indigo-600 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer transition-colors"
                         >
                           Filter all
@@ -566,23 +589,48 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {allFilaments.map((f, i) => (
+                      {allFilaments.map((rf, i) => (
                         <button
                           key={i}
-                          onClick={() => onFilterByFilaments?.([f.color.toLowerCase()])}
+                          onClick={() => onFilterByFilaments?.([filamentKey(rf.current)])}
                           className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 cursor-pointer transition-colors"
                         >
-                          <div
-                            className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
-                            style={{ backgroundColor: f.color }}
-                            title={f.color}
-                          />
-                          <span className="text-gray-700 dark:text-gray-300">
-                            {f.brand} {f.name}
-                          </span>
-                          <span className="text-gray-400 dark:text-gray-500 font-mono text-[10px]">
-                            {f.color}
-                          </span>
+                          {rf.original ? (
+                            <>
+                              <div
+                                className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-500 shrink-0 opacity-40"
+                                style={{ backgroundColor: rf.original.color }}
+                              />
+                              <span className="text-gray-400 dark:text-gray-500 line-through">
+                                {rf.original.brand} {rf.original.name}
+                              </span>
+                              <svg className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                              </svg>
+                              <div
+                                className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
+                                style={{ backgroundColor: rf.current.color }}
+                                title={rf.current.color}
+                              />
+                              <span className="text-gray-700 dark:text-gray-300">
+                                {rf.current.brand} {rf.current.name}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <div
+                                className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
+                                style={{ backgroundColor: rf.current.color }}
+                                title={rf.current.color}
+                              />
+                              <span className="text-gray-700 dark:text-gray-300">
+                                {rf.current.brand} {rf.current.name}
+                              </span>
+                              <span className="text-gray-400 dark:text-gray-500 font-mono text-[10px]">
+                                {rf.current.color}
+                              </span>
+                            </>
+                          )}
                         </button>
                       ))}
                     </div>

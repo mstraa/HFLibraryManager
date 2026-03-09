@@ -9,6 +9,7 @@ import CreateProjectDialog from "./components/CreateProjectDialog";
 import ProjectDetail from "./components/ProjectDetail";
 import BulkActions from "./components/BulkActions";
 import Settings from "./components/Settings";
+import FilamentManager from "./components/FilamentManager";
 import Welcome from "./components/Welcome";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useFileDrop } from "./hooks/useFileDrop";
@@ -45,6 +46,7 @@ function App() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showFilamentManager, setShowFilamentManager] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -236,9 +238,22 @@ function App() {
     return <Welcome onComplete={() => setShowWelcome(false)} />;
   }
 
+  // Filament manager view
+  if (showFilamentManager) {
+    return <FilamentManager onBack={() => {
+      setShowFilamentManager(false);
+      // Refresh data since substitutions may have changed
+      setSidebarRefreshKey((k) => k + 1);
+      loadProjects();
+    }} />;
+  }
+
   // Settings view
   if (showSettings) {
-    return <Settings onBack={() => setShowSettings(false)} onLibraryChanged={() => {
+    return <Settings onBack={() => setShowSettings(false)} onOpenFilamentManager={() => {
+      setShowSettings(false);
+      setShowFilamentManager(true);
+    }} onLibraryChanged={() => {
       // Reset all filters and navigation state when library changes
       setSearch("");
       setSelectedTags([]);
@@ -265,8 +280,8 @@ function App() {
         onBack={handleBack}
         onDeleted={handleBack}
         onDuplicated={(newId) => navigateTo(newId)}
-        onFilterByFilaments={(hexColors) => {
-          setSelectedFilaments(hexColors);
+        onFilterByFilaments={(keys) => {
+          setSelectedFilaments(keys);
           navigateTo(null);
         }}
       />
@@ -339,8 +354,8 @@ function App() {
             onProjectClick={navigateTo}
             selectedIds={selectedProjectIds}
             onToggleSelect={handleToggleSelect}
-            onFilamentClick={(hex) => setSelectedFilaments((prev) =>
-              prev.includes(hex) ? prev : [...prev, hex]
+            onFilamentClick={(key) => setSelectedFilaments((prev) =>
+              prev.includes(key) ? prev : [...prev, key]
             )}
             onSizeClick={(size) => setSelectedSize(size)}
           />
@@ -350,8 +365,8 @@ function App() {
             onProjectClick={navigateTo}
             selectedIds={selectedProjectIds}
             onToggleSelect={handleToggleSelect}
-            onFilamentClick={(hex) => setSelectedFilaments((prev) =>
-              prev.includes(hex) ? prev : [...prev, hex]
+            onFilamentClick={(key) => setSelectedFilaments((prev) =>
+              prev.includes(key) ? prev : [...prev, key]
             )}
             onSizeClick={(size) => setSelectedSize(size)}
           />

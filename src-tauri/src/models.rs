@@ -21,7 +21,7 @@ pub struct ProjectSummary {
     pub updated_at: String,
     pub tags: Vec<Tag>,
     pub file_count: i64,
-    pub filaments: Vec<FilamentInfo>,
+    pub filaments: Vec<ResolvedFilament>,
     pub size: Option<String>,
 }
 
@@ -77,6 +77,20 @@ pub struct FilamentInfo {
     pub color: String,
     pub name: String,
     pub brand: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ResolvedFilament {
+    pub current: FilamentInfo,
+    pub original: Option<FilamentInfo>,  // Some if this was substituted
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FilamentSubstitution {
+    pub from_key: String,
+    pub from: FilamentInfo,
+    pub to_key: String,
+    pub to: FilamentInfo,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
