@@ -1,6 +1,10 @@
+import { memo } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ProjectSummary } from "../lib/types";
 import { useThumbnailMode } from "../hooks/useThumbnailMode";
+import { formatRelativeDate } from "../lib/formatting";
+import FilamentBadge from "./FilamentBadge";
+import TagBadges from "./TagBadges";
 
 
 interface ProjectCardProps {
@@ -13,21 +17,7 @@ interface ProjectCardProps {
   onSizeClick?: (size: string) => void;
 }
 
-function formatRelativeDate(iso: string): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
-  return `${Math.floor(diffDays / 365)}y ago`;
-}
-
-export default function ProjectCard({
+function ProjectCard({
   project,
   onClick,
   selected = false,
@@ -119,28 +109,7 @@ export default function ProjectCard({
         {project.filaments.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {project.filaments.map((pf) => (
-              <button
-                key={pf.project_filament_id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (pf.curated_filament_id) onFilamentClick?.(pf.curated_filament_id);
-                }}
-                className={`w-4 h-4 rounded-full cursor-pointer hover:scale-125 transition-transform ${
-                  pf.match_status === "unmatched"
-                    ? "border-2 border-gray-400 dark:border-gray-500"
-                    : pf.match_status === "guessed"
-                      ? "border-2 border-dashed border-gray-300 dark:border-gray-500"
-                      : "border border-gray-300 dark:border-gray-500"
-                }`}
-                style={{ backgroundColor: pf.match_status === "unmatched" ? (pf.parsed_color || "#9ca3af") : pf.color }}
-                title={pf.match_status === "unmatched"
-                  ? `Unmatched: ${pf.parsed_brand} ${pf.parsed_name} (${pf.parsed_color})`
-                  : `${pf.brand} ${pf.name} (${pf.color})`}
-              >
-                {pf.match_status === "unmatched" && !pf.parsed_color && (
-                  <span className="text-[8px] font-bold text-white flex items-center justify-center h-full">?</span>
-                )}
-              </button>
+              <FilamentBadge key={pf.project_filament_id} filament={pf} onFilamentClick={onFilamentClick} />
             ))}
           </div>
         )}
@@ -167,19 +136,13 @@ export default function ProjectCard({
         )}
 
         {project.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {project.tags.map((tag) => (
-              <span
-                key={tag.id}
-                className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
-                style={{ backgroundColor: tag.color }}
-              >
-                {tag.name}
-              </span>
-            ))}
+          <div className="mt-1.5">
+            <TagBadges tags={project.tags} />
           </div>
         )}
       </div>
     </div>
   );
 }
+
+export default memo(ProjectCard);

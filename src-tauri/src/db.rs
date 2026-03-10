@@ -448,6 +448,58 @@ impl Database {
             conn.execute("ALTER TABLE projects ADD COLUMN print_time_mins INTEGER", []).ok();
         }
 
+        // Migration: make file_id nullable for manual project_filaments
+        let pf_has_notnull_file_id: bool = conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_filaments'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).map(|sql| sql.contains("file_id TEXT NOT NULL")).unwrap_or(false);
+
+        if pf_has_notnull_file_id {
+            conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+            conn.execute_batch(
+                "
+                CREATE TABLE project_filaments_v2 (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    file_id TEXT,
+                    curated_filament_id TEXT,
+                    parsed_color TEXT NOT NULL DEFAULT '',
+                    parsed_brand TEXT NOT NULL DEFAULT '',
+                    parsed_name TEXT NOT NULL DEFAULT '',
+                    parsed_td REAL,
+                    match_status TEXT NOT NULL DEFAULT 'unmatched'
+                        CHECK(match_status IN ('exact', 'guessed', 'unmatched', 'confirmed')),
+                    is_manual INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+                );
+                INSERT INTO project_filaments_v2
+                    SELECT id, project_id, NULLIF(file_id, ''), curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status,
+                           COALESCE(is_manual, 0) FROM project_filaments;
+                DROP TABLE project_filaments;
+                ALTER TABLE project_filaments_v2 RENAME TO project_filaments;
+                "
+            )?;
+            conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        }
+
+        // Performance indexes
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_projects_created_at ON projects(created_at);
+            CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
+            CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id);
+            CREATE INDEX IF NOT EXISTS idx_files_favorited ON files(favorited);
+            CREATE INDEX IF NOT EXISTS idx_project_filaments_project_id ON project_filaments(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_tags_project_id ON project_tags(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_tags_tag_id ON project_tags(tag_id);
+            CREATE INDEX IF NOT EXISTS idx_project_collections_project_id ON project_collections(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_collections_collection_id ON project_collections(collection_id);
+            "
+        )?;
+
         Ok(())
     }
 

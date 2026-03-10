@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createTag, updateTag, deleteTag } from "../lib/api";
 import type { TagWithCount } from "../lib/types";
+import Modal from "./Modal";
 
 const PRESET_COLORS = [
   "#6366f1", "#8b5cf6", "#ec4899", "#ef4444", "#f97316",
@@ -20,8 +21,6 @@ export default function TagManager({ open, onClose, tags, onRefresh }: TagManage
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
-
-  if (!open) return null;
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -50,22 +49,8 @@ export default function TagManager({ open, onClose, tags, onRefresh }: TagManage
     setEditColor(tag.color);
   }
 
-  function handleBackdropClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={handleBackdropClick}>
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Manage Tags</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
+    <Modal open={open} onClose={onClose} title="Manage Tags">
         {/* Create new tag */}
         <form onSubmit={handleCreate} className="mb-4 space-y-2">
           <div className="flex gap-2">
@@ -165,7 +150,6 @@ export default function TagManager({ open, onClose, tags, onRefresh }: TagManage
             ))
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

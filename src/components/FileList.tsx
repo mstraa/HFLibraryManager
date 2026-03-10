@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -12,6 +12,8 @@ import {
   openFileWithApp,
 } from "../lib/api";
 import type { ProjectFile } from "../lib/types";
+import { formatFileSize, formatDate } from "../lib/formatting";
+import ConfirmDialog from "./ConfirmDialog";
 
 // ── File grouping ──
 
@@ -49,19 +51,6 @@ function getGroup(filename: string): FileGroup {
   return "other";
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
-
 function getAppForFile(ext: string): { name: string; app: string; btnClass: string } | null {
   if (PRINT_EXTS.has(ext)) return {
     name: "Bambu Studio",
@@ -80,8 +69,6 @@ function getAppForFile(ext: string): { name: string; app: string; btnClass: stri
   };
   return null;
 }
-
-const THUMBNAIL_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
 
 // ── Preview Panel ──
 
@@ -170,6 +157,7 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const scrollRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
   // External preview control
   useEffect(() => {
@@ -207,18 +195,24 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
   }, [contextMenu]);
 
   // Filter files by search query
-  const filteredFiles = searchQuery
-    ? files.filter(f => f.original_filename.toLowerCase().includes(searchQuery.toLowerCase()))
-    : files;
+  const filteredFiles = useMemo(() =>
+    searchQuery
+      ? files.filter(f => f.original_filename.toLowerCase().includes(searchQuery.toLowerCase()))
+      : files,
+    [files, searchQuery]
+  );
 
   // Favorites from unfiltered list (for chips strip)
-  const allFavorites = files.filter(f => f.favorited);
+  const allFavorites = useMemo(() => files.filter(f => f.favorited), [files]);
 
   // Group ALL filtered files into categories (favorites included in their natural group)
-  const groups: Record<FileGroup, ProjectFile[]> = { design: [], hueforge: [], hueforge_export: [], print: [], other: [] };
-  for (const f of filteredFiles) {
-    groups[getGroup(f.original_filename)].push(f);
-  }
+  const groups = useMemo(() => {
+    const g: Record<FileGroup, ProjectFile[]> = { design: [], hueforge: [], hueforge_export: [], print: [], other: [] };
+    for (const f of filteredFiles) {
+      g[getGroup(f.original_filename)].push(f);
+    }
+    return g;
+  }, [filteredFiles]);
 
   // ── Handlers ──
 
@@ -244,6 +238,11 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
     if (previewFile?.id === fileId) setPreviewFile(null);
     await deleteFile(fileId);
     onRefresh();
+    setContextMenu(null);
+  }
+
+  function confirmDelete(file: ProjectFile) {
+    setDeleteConfirm({ id: file.id, name: file.original_filename });
     setContextMenu(null);
   }
 
@@ -701,7 +700,7 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
             </svg>
             {contextMenu.file.notes ? "Edit notes" : "Add notes"}
           </button>
-          {onSetThumbnail && THUMBNAIL_EXTS.has(getExt(contextMenu.file.original_filename)) && (
+          {onSetThumbnail && PREVIEW_IMAGE_EXTS.has(getExt(contextMenu.file.original_filename)) && (
             <button
               onClick={() => { onSetThumbnail(contextMenu.file.file_path); setContextMenu(null); }}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer"
@@ -714,7 +713,7 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
           )}
           <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
           <button
-            onClick={() => handleDelete(contextMenu.file.id)}
+            onClick={() => confirmDelete(contextMenu.file)}
             className="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 cursor-pointer"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -724,6 +723,19 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
           </button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        title="Delete file"
+        message={`Are you sure you want to delete "${deleteConfirm?.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          if (deleteConfirm) handleDelete(deleteConfirm.id);
+          setDeleteConfirm(null);
+        }}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

@@ -188,7 +188,9 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
 
         // Copy file on disk
         if src.exists() {
-            fs::copy(src, &dest).ok();
+            if let Err(e) = fs::copy(src, &dest) {
+                eprintln!("Warning: failed to copy file {:?}: {}", src, e);
+            }
         }
 
         // Copy thumbnail if exists
@@ -197,7 +199,9 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
             if src_thumb.exists() {
                 let thumb_name = format!("file_{}.png", new_file_id);
                 let dest_thumb = new_thumb_dir.join(&thumb_name);
-                fs::copy(src_thumb, &dest_thumb).ok();
+                if let Err(e) = fs::copy(src_thumb, &dest_thumb) {
+                    eprintln!("Warning: failed to copy thumbnail {:?}: {}", src_thumb, e);
+                }
                 Some(dest_thumb.to_string_lossy().to_string())
             } else {
                 None
@@ -218,11 +222,15 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
     let src_cover_svg = Database::data_dir().join("projects").join(&id).join("thumbnails").join("cover.svg");
     let new_thumb_path = if src_cover.exists() {
         let dest = new_thumb_dir.join("cover.png");
-        fs::copy(&src_cover, &dest).ok();
+        if let Err(e) = fs::copy(&src_cover, &dest) {
+            eprintln!("Warning: failed to copy cover thumbnail: {}", e);
+        }
         Some(dest.to_string_lossy().to_string())
     } else if src_cover_svg.exists() {
         let dest = new_thumb_dir.join("cover.svg");
-        fs::copy(&src_cover_svg, &dest).ok();
+        if let Err(e) = fs::copy(&src_cover_svg, &dest) {
+            eprintln!("Warning: failed to copy cover SVG: {}", e);
+        }
         Some(dest.to_string_lossy().to_string())
     } else {
         None
@@ -782,7 +790,9 @@ pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
     if path.exists() {
         let filename = path.file_name().unwrap_or_default();
         let trash_dir = Database::data_dir().join("deleted").join("files").join(&project_id);
-        fs::create_dir_all(&trash_dir).ok();
+        if let Err(e) = fs::create_dir_all(&trash_dir) {
+            eprintln!("Warning: failed to create trash dir: {}", e);
+        }
         let dest = trash_dir.join(filename);
         // If same filename already in trash, add file_id suffix
         let dest = if dest.exists() {
@@ -792,7 +802,9 @@ pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
         } else {
             dest
         };
-        fs::rename(path, &dest).ok();
+        if let Err(e) = fs::rename(path, &dest) {
+            eprintln!("Warning: failed to move file to trash: {}", e);
+        }
     }
 
     // Also move thumbnail if it exists
@@ -801,8 +813,12 @@ pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
         .join(format!("file_{}.png", file_id));
     if thumb_path.exists() {
         let trash_thumb_dir = Database::data_dir().join("deleted").join("files").join(&project_id);
-        fs::create_dir_all(&trash_thumb_dir).ok();
-        fs::rename(&thumb_path, trash_thumb_dir.join(format!("file_{}.png", file_id))).ok();
+        if let Err(e) = fs::create_dir_all(&trash_thumb_dir) {
+            eprintln!("Warning: failed to create thumbnail trash dir: {}", e);
+        }
+        if let Err(e) = fs::rename(&thumb_path, trash_thumb_dir.join(format!("file_{}.png", file_id))) {
+            eprintln!("Warning: failed to move thumbnail to trash: {}", e);
+        }
     }
 
     Ok(())
@@ -1379,8 +1395,10 @@ pub fn list_folder_files(path: String) -> CmdResult<Vec<String>> {
     if !dir.is_dir() {
         return Err("Not a directory".to_string());
     }
+    // Canonicalize to prevent path traversal
+    let canonical = dir.canonicalize().map_err(map_err)?;
     let mut files: Vec<String> = Vec::new();
-    for entry in fs::read_dir(dir).map_err(map_err)?.flatten() {
+    for entry in fs::read_dir(&canonical).map_err(map_err)?.flatten() {
         let p = entry.path();
         if !p.is_file() { continue; }
         let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
@@ -1400,6 +1418,21 @@ pub fn open_file_in_default_app(path: String) -> CmdResult<()> {
 
 #[tauri::command]
 pub fn open_file_with_app(path: String, app: String) -> CmdResult<()> {
+    // Validate app against whitelist
+    const ALLOWED_APPS: &[&str] = &[
+        "BambuStudio",
+        "HueForge",
+        "Affinity Designer 2",
+        "Affinity Photo 2",
+        "Affinity Publisher 2",
+    ];
+    if !ALLOWED_APPS.iter().any(|a| *a == app) {
+        return Err(format!("Application '{}' is not in the allowed list", app));
+    }
+    // Validate path exists
+    if !Path::new(&path).is_file() {
+        return Err("File does not exist".to_string());
+    }
     std::process::Command::new("open")
         .arg("-a")
         .arg(&app)
@@ -1893,14 +1926,11 @@ pub fn add_manual_project_filament(db: State<Database>, project_id: String, cura
     let parsed_brand = if line.is_empty() { brand.clone() } else { format!("{} {}", brand, line) };
     let pf_id = Uuid::new_v4().to_string();
 
-    conn.execute_batch("PRAGMA foreign_keys=OFF;").map_err(map_err)?;
-    let result = conn.execute(
+    conn.execute(
         "INSERT INTO project_filaments (id, project_id, file_id, curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual)
-         VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?7, 'confirmed', 1)",
+         VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, 'confirmed', 1)",
         rusqlite::params![pf_id, project_id, curated_filament_id, color, parsed_brand, name, td],
-    ).map_err(map_err);
-    conn.execute_batch("PRAGMA foreign_keys=ON;").map_err(map_err)?;
-    result?;
+    ).map_err(map_err)?;
 
     Ok(())
 }

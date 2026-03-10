@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { formatBytes } from "../lib/formatting";
 import { getLibraries, addLibrary, removeLibrary, switchLibrary, renameLibrary, getStorageSizes, emptyTrash, clearAllCuratedFilaments, reparseAllProjectFilaments, rematchUnmatchedFilaments } from "../lib/api";
 import { onDragMouseDown } from "../hooks/useDrag";
 import { useTheme, type Theme } from "../hooks/useTheme";
@@ -14,14 +15,6 @@ interface SettingsProps {
 interface LibraryEntry {
   name: string;
   path: string;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = bytes / Math.pow(1024, i);
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
 }
 
 export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {

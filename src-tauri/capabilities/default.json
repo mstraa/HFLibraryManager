@@ -11,7 +11,6 @@
     "dialog:default",
     "fs:default",
     "fs:allow-read-text-file",
-    "fs:allow-home-read-recursive",
     "mcp-bridge:default"
   ]
 }

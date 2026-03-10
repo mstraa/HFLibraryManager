@@ -32,7 +32,7 @@ pub fn extract_3mf_thumbnail(file_path: &Path) -> Option<Vec<u8>> {
         }
         if let Ok(mut entry) = archive.by_name(path) {
             let mut buf = Vec::new();
-            if entry.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+            if entry.read_to_end(&mut buf).is_ok() && !buf.is_empty() && buf.len() <= 50 * 1024 * 1024 {
                 // Verify it's actually an image
                 if image::guess_format(&buf).is_ok() {
                     return Some(buf);
@@ -45,11 +45,13 @@ pub fn extract_3mf_thumbnail(file_path: &Path) -> Option<Vec<u8>> {
     for i in 0..archive.len() {
         if let Ok(mut entry) = archive.by_index(i) {
             let name = entry.name().to_lowercase();
+            // Skip entries with path traversal attempts
+            if name.contains("..") || name.starts_with('/') { continue; }
             if (name.ends_with(".png") || name.ends_with(".jpg") || name.ends_with(".jpeg"))
                 && (name.contains("thumb") || name.contains("plate") || name.contains("pick"))
             {
                 let mut buf = Vec::new();
-                if entry.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                if entry.read_to_end(&mut buf).is_ok() && !buf.is_empty() && buf.len() <= 50 * 1024 * 1024 {
                     return Some(buf);
                 }
             }

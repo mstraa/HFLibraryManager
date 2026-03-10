@@ -103,7 +103,7 @@ export default function Sidebar({
     loadFilters();
   }, [loadFilters, refreshKey]);
 
-  function toggleTag(id: string) {
+  const toggleTag = useCallback((id: string) => {
     if (excludedTags.includes(id)) {
       onExcludedTagsChange(excludedTags.filter((t) => t !== id));
       return;
@@ -113,9 +113,9 @@ export default function Sidebar({
     } else {
       onTagsChange([...selectedTags, id]);
     }
-  }
+  }, [selectedTags, excludedTags, onTagsChange, onExcludedTagsChange]);
 
-  function excludeTag(id: string) {
+  const excludeTag = useCallback((id: string) => {
     if (selectedTags.includes(id)) {
       onTagsChange(selectedTags.filter((t) => t !== id));
     }
@@ -124,9 +124,9 @@ export default function Sidebar({
     } else {
       onExcludedTagsChange([...excludedTags, id]);
     }
-  }
+  }, [selectedTags, excludedTags, onTagsChange, onExcludedTagsChange]);
 
-  function toggleFilament(id: string) {
+  const toggleFilament = useCallback((id: string) => {
     if (excludedFilaments.includes(id)) {
       onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== id));
       return;
@@ -136,9 +136,9 @@ export default function Sidebar({
     } else {
       onFilamentsChange([...selectedFilaments, id]);
     }
-  }
+  }, [selectedFilaments, excludedFilaments, onFilamentsChange, onExcludedFilamentsChange]);
 
-  function toggleNoFilament() {
+  const toggleNoFilament = useCallback(() => {
     if (noFilamentFilter === "exclude") {
       onNoFilamentFilterChange(undefined);
       return;
@@ -148,9 +148,9 @@ export default function Sidebar({
     } else {
       onNoFilamentFilterChange("include");
     }
-  }
+  }, [noFilamentFilter, onNoFilamentFilterChange]);
 
-  function excludeNoFilament() {
+  const excludeNoFilament = useCallback(() => {
     if (noFilamentFilter === "include") {
       onNoFilamentFilterChange(undefined);
     }
@@ -159,9 +159,9 @@ export default function Sidebar({
     } else {
       onNoFilamentFilterChange("exclude");
     }
-  }
+  }, [noFilamentFilter, onNoFilamentFilterChange]);
 
-  function excludeFilament(id: string) {
+  const excludeFilament = useCallback((id: string) => {
     if (selectedFilaments.includes(id)) {
       onFilamentsChange(selectedFilaments.filter((k) => k !== id));
     }
@@ -170,17 +170,17 @@ export default function Sidebar({
     } else {
       onExcludedFilamentsChange([...excludedFilaments, id]);
     }
-  }
+  }, [selectedFilaments, excludedFilaments, onFilamentsChange, onExcludedFilamentsChange]);
 
-  function toggleSize(s: string) {
+  const toggleSize = useCallback((s: string) => {
     if (excludedSizes.includes(s)) {
       onExcludedSizesChange(excludedSizes.filter((x) => x !== s));
       return;
     }
     onSizeChange(selectedSize === s ? undefined : s);
-  }
+  }, [selectedSize, excludedSizes, onSizeChange, onExcludedSizesChange]);
 
-  function excludeSize(s: string) {
+  const excludeSize = useCallback((s: string) => {
     if (selectedSize === s) {
       onSizeChange(undefined);
     }
@@ -189,7 +189,7 @@ export default function Sidebar({
     } else {
       onExcludedSizesChange([...excludedSizes, s]);
     }
-  }
+  }, [selectedSize, excludedSizes, onSizeChange, onExcludedSizesChange]);
 
   function clearAll() {
     onTagsChange([]);

@@ -248,6 +248,16 @@ function App() {
 
   const { isDragging } = useFileDrop(handleFolderDrop);
 
+  const handleFilamentClick = useCallback((key: string) => {
+    setSelectedFilaments((prev) =>
+      prev.includes(key) ? prev : [...prev, key]
+    );
+  }, []);
+
+  const handleSizeClick = useCallback((size: string) => {
+    setSelectedSize(size);
+  }, []);
+
   // First launch — show welcome screen
   if (showWelcome === null) {
     return <div className="h-screen bg-gray-900" />; // loading
@@ -386,10 +396,8 @@ function App() {
             onProjectClick={navigateTo}
             selectedIds={selectedProjectIds}
             onToggleSelect={handleToggleSelect}
-            onFilamentClick={(key) => setSelectedFilaments((prev) =>
-              prev.includes(key) ? prev : [...prev, key]
-            )}
-            onSizeClick={(size) => setSelectedSize(size)}
+            onFilamentClick={handleFilamentClick}
+            onSizeClick={handleSizeClick}
           />
         ) : (
           <ProjectTable
@@ -397,10 +405,8 @@ function App() {
             onProjectClick={navigateTo}
             selectedIds={selectedProjectIds}
             onToggleSelect={handleToggleSelect}
-            onFilamentClick={(key) => setSelectedFilaments((prev) =>
-              prev.includes(key) ? prev : [...prev, key]
-            )}
-            onSizeClick={(size) => setSelectedSize(size)}
+            onFilamentClick={handleFilamentClick}
+            onSizeClick={handleSizeClick}
           />
         )}
 

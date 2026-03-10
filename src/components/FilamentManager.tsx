@@ -18,6 +18,7 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
   const [filterMaterial, setFilterMaterial] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -61,7 +62,8 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
     if (!path) return;
     const count = await importCuratedFilaments(path);
     await load();
-    alert(`Imported ${count} filaments`);
+    setToast(`Imported ${count} filaments`);
+    setTimeout(() => setToast(null), 3000);
   }
 
   async function handleToggleOwned(id: string, current: boolean) {
@@ -250,6 +252,13 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
           </div>
         )}
       </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

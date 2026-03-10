@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import Modal from "./Modal";
 
 interface CreateProjectDialogProps {
   open: boolean;
@@ -27,16 +28,10 @@ export default function CreateProjectDialog({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || loading) return;
     onCreate(name.trim(), description.trim(), importFolder);
-  }
-
-  function handleBackdropClick(e: React.MouseEvent) {
-    if (!loading && e.target === e.currentTarget) onClose();
   }
 
   async function handleSelectFolder() {
@@ -54,15 +49,7 @@ export default function CreateProjectDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-      onClick={handleBackdropClick}
-    >
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-          New Project
-        </h2>
-
+    <Modal open={isOpen} onClose={onClose} title="New Project" preventClose={loading}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -150,7 +137,6 @@ export default function CreateProjectDialog({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

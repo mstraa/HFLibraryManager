@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createCollection, updateCollection, deleteCollection } from "../lib/api";
 import type { Collection } from "../lib/types";
+import Modal from "./Modal";
 
 interface CollectionManagerProps {
   open: boolean;
@@ -15,8 +16,6 @@ export default function CollectionManager({ open, onClose, collections, onRefres
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
-
-  if (!open) return null;
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -45,22 +44,8 @@ export default function CollectionManager({ open, onClose, collections, onRefres
     setEditDesc(c.description);
   }
 
-  function handleBackdropClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={handleBackdropClick}>
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Manage Collections</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
+    <Modal open={open} onClose={onClose} title="Manage Collections">
         {/* Create new collection */}
         <form onSubmit={handleCreate} className="space-y-2 mb-4">
           <input
@@ -149,7 +134,6 @@ export default function CollectionManager({ open, onClose, collections, onRefres
             ))
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
