@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listAllFilamentsRaw, getFilamentSubstitutions, setFilamentSubstitution } from "../lib/api";
-import type { FilamentInfo } from "../lib/types";
-import { filamentKey } from "../lib/types";
+import { open } from "@tauri-apps/plugin-dialog";
+import { listCuratedFilaments, createCuratedFilament, updateCuratedFilament, deleteCuratedFilament, importCuratedFilaments } from "../lib/api";
+import type { CuratedFilament } from "../lib/types";
 import { onDragMouseDown } from "../hooks/useDrag";
 
 interface FilamentManagerProps {
@@ -9,23 +9,20 @@ interface FilamentManagerProps {
 }
 
 export default function FilamentManager({ onBack }: FilamentManagerProps) {
-  const [allFilaments, setAllFilaments] = useState<FilamentInfo[]>([]);
-  const [substitutions, setSubstitutions] = useState<Map<string, string>>(new Map());
+  const [filaments, setFilaments] = useState<CuratedFilament[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filterOwned, setFilterOwned] = useState(false);
+  const [filterBrand, setFilterBrand] = useState("");
+  const [filterLine, setFilterLine] = useState("");
+  const [filterMaterial, setFilterMaterial] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [filaments, subs] = await Promise.all([
-        listAllFilamentsRaw(),
-        getFilamentSubstitutions(),
-      ]);
-      setAllFilaments(filaments);
-      const map = new Map<string, string>();
-      for (const s of subs) {
-        map.set(s.from_key, s.to_key);
-      }
-      setSubstitutions(map);
+      const list = await listCuratedFilaments();
+      setFilaments(list);
     } finally {
       setLoading(false);
     }
@@ -33,29 +30,48 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
 
   useEffect(() => { load(); }, [load]);
 
-  const filteredFilaments = useMemo(() => {
-    if (!search) return allFilaments;
+  const uniqueBrands = useMemo(() => [...new Set(filaments.map(f => f.brand).filter(Boolean))].sort(), [filaments]);
+  const uniqueLines = useMemo(() => [...new Set(filaments.map(f => f.line).filter(Boolean))].sort(), [filaments]);
+  const uniqueMaterials = useMemo(() => [...new Set(filaments.map(f => f.material).filter(Boolean))].sort(), [filaments]);
+
+  const filtered = useMemo(() => {
+    let list = filaments;
+    if (filterOwned) list = list.filter(f => f.owned);
+    if (filterBrand) list = list.filter(f => f.brand === filterBrand);
+    if (filterLine) list = list.filter(f => f.line === filterLine);
+    if (filterMaterial) list = list.filter(f => f.material === filterMaterial);
+    if (!search) return list;
     const q = search.toLowerCase();
-    return allFilaments.filter(f =>
+    return list.filter(f =>
       f.brand.toLowerCase().includes(q) ||
+      f.line.toLowerCase().includes(q) ||
       f.name.toLowerCase().includes(q) ||
+      f.material.toLowerCase().includes(q) ||
       f.color.toLowerCase().includes(q)
     );
-  }, [allFilaments, search]);
+  }, [filaments, search, filterOwned, filterBrand, filterLine, filterMaterial]);
 
-  async function handleSetSubstitution(fromKey: string, toKey: string | null) {
-    const actualTo = toKey === "-" ? null : toKey;
-    await setFilamentSubstitution(fromKey, actualTo);
-    // Update local state
-    setSubstitutions(prev => {
-      const next = new Map(prev);
-      if (actualTo) {
-        next.set(fromKey, actualTo);
-      } else {
-        next.delete(fromKey);
-      }
-      return next;
+  async function handleImport() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "JSON", extensions: ["json"] }],
     });
+    if (!selected) return;
+    const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
+    if (!path) return;
+    const count = await importCuratedFilaments(path);
+    await load();
+    alert(`Imported ${count} filaments`);
+  }
+
+  async function handleToggleOwned(id: string, current: boolean) {
+    await updateCuratedFilament(id, { owned: !current });
+    setFilaments(prev => prev.map(f => f.id === id ? { ...f, owned: !current } : f));
+  }
+
+  async function handleDelete(id: string) {
+    await deleteCuratedFilament(id);
+    setFilaments(prev => prev.filter(f => f.id !== id));
   }
 
   if (loading) {
@@ -78,213 +94,239 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filament Management</h1>
-        <span className="text-xs text-gray-400 dark:text-gray-500">{allFilaments.length} filaments</span>
+        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filament Library</h1>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{filaments.length} filaments</span>
+        <div className="flex-1" />
+        <button
+          onClick={() => setShowAdd(true)}
+          className="text-xs px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 cursor-pointer transition-colors"
+        >
+          Add
+        </button>
+        <button
+          onClick={handleImport}
+          className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+        >
+          Import JSON
+        </button>
       </div>
 
-      {/* Search */}
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+      {/* Search + Filters */}
+      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-3 flex-wrap">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search filaments..."
-          className="w-full max-w-md px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="flex-1 min-w-[150px] max-w-md px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
         />
+        <select
+          value={filterBrand}
+          onChange={(e) => setFilterBrand(e.target.value)}
+          className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+        >
+          <option value="">All brands</option>
+          {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select
+          value={filterLine}
+          onChange={(e) => setFilterLine(e.target.value)}
+          className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+        >
+          <option value="">All lines</option>
+          {uniqueLines.map(l => <option key={l} value={l}>{l}</option>)}
+        </select>
+        <select
+          value={filterMaterial}
+          onChange={(e) => setFilterMaterial(e.target.value)}
+          className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+        >
+          <option value="">All materials</option>
+          {uniqueMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={filterOwned}
+            onChange={(e) => setFilterOwned(e.target.checked)}
+            className="rounded"
+          />
+          Owned only
+        </label>
+        <span className="text-xs text-gray-400 dark:text-gray-500">{filtered.length} shown</span>
       </div>
 
-      {/* Filament list */}
+      {/* Add form */}
+      {showAdd && (
+        <AddFilamentForm
+          onAdd={async (data) => {
+            await createCuratedFilament(data);
+            setShowAdd(false);
+            load();
+          }}
+          onCancel={() => setShowAdd(false)}
+        />
+      )}
+
+      {/* Table */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto p-4">
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-            Merge filaments by selecting a replacement. The original filament will be hidden from filters and replaced in project views.
-          </p>
-
-          <div className="space-y-1">
-            {filteredFilaments.map((f) => {
-              const key = filamentKey(f);
-              const currentTarget = substitutions.get(key);
-              return (
-                <FilamentRow
-                  key={key}
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 z-10">
+            <tr>
+              <th className="w-8 px-3 py-2" />
+              <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Brand</th>
+              <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Line</th>
+              <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Material</th>
+              <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Name</th>
+              <th className="text-left px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">TD</th>
+              <th className="text-center px-3 py-2 font-medium text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Owned</th>
+              <th className="w-16 px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+            {filtered.map((f) => (
+              editingId === f.id ? (
+                <EditFilamentRow
+                  key={f.id}
                   filament={f}
-                  filamentKey={key}
-                  currentTarget={currentTarget}
-                  allFilaments={allFilaments}
-                  onSetSubstitution={handleSetSubstitution}
+                  onSave={async (updates) => {
+                    await updateCuratedFilament(f.id, updates);
+                    setEditingId(null);
+                    load();
+                  }}
+                  onCancel={() => setEditingId(null)}
                 />
-              );
-            })}
+              ) : (
+                <tr key={f.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                  <td className="px-3 py-2">
+                    <div
+                      className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500"
+                      style={{ backgroundColor: f.color || "#ccc" }}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{f.brand}</td>
+                  <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{f.line}</td>
+                  <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{f.material}</td>
+                  <td className="px-3 py-2 text-gray-700 dark:text-gray-300 font-medium">{f.name}</td>
+                  <td className="px-3 py-2 text-gray-500 dark:text-gray-400 font-mono text-xs">{f.transmission_distance ?? "—"}</td>
+                  <td className="px-3 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={f.owned}
+                      onChange={() => handleToggleOwned(f.id, f.owned)}
+                      className="rounded cursor-pointer"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setEditingId(f.id)}
+                        className="text-gray-400 hover:text-indigo-500 cursor-pointer p-1"
+                        title="Edit"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(f.id)}
+                        className="text-gray-400 hover:text-red-500 cursor-pointer p-1"
+                        title="Delete"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && (
+          <div className="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">
+            No filaments found
           </div>
-
-          {filteredFilaments.length === 0 && (
-            <div className="text-center py-12 text-gray-400 dark:text-gray-500 text-sm">
-              No filaments found
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
-interface FilamentRowProps {
-  filament: FilamentInfo;
-  filamentKey: string;
-  currentTarget: string | undefined;
-  allFilaments: FilamentInfo[];
-  onSetSubstitution: (fromKey: string, toKey: string | null) => void;
-}
-
-function FilamentRow({ filament, filamentKey: fKey, currentTarget, allFilaments, onSetSubstitution }: FilamentRowProps) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [dropdownSearch, setDropdownSearch] = useState("");
-  const dropdownRef = useRef<HTMLDivElement>(null);
+function AddFilamentForm({ onAdd, onCancel }: {
+  onAdd: (data: { brand: string; line?: string; material?: string; name: string; color?: string; transmission_distance?: number; owned?: boolean }) => void;
+  onCancel: () => void;
+}) {
+  const [brand, setBrand] = useState("");
+  const [line, setLine] = useState("");
+  const [material, setMaterial] = useState("PLA");
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("");
+  const [td, setTd] = useState("");
+  const [owned, setOwned] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Close dropdown on click outside
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [dropdownOpen]);
-
-  useEffect(() => {
-    if (dropdownOpen) {
-      inputRef.current?.focus();
-    } else {
-      setDropdownSearch("");
-    }
-  }, [dropdownOpen]);
-
-  // Find the target filament info
-  const targetFilament = currentTarget
-    ? allFilaments.find(f => filamentKey(f) === currentTarget)
-    : null;
-
-  // Filter dropdown options (exclude self)
-  const options = allFilaments.filter(f => {
-    const key = filamentKey(f);
-    if (key === fKey) return false;
-    if (!dropdownSearch) return true;
-    const q = dropdownSearch.toLowerCase();
-    return f.brand.toLowerCase().includes(q) || f.name.toLowerCase().includes(q) || f.color.toLowerCase().includes(q);
-  });
+  useEffect(() => { inputRef.current?.focus(); }, []);
 
   return (
-    <div className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-      currentTarget ? "bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
-    }`}>
-      {/* Source filament */}
-      <div className={`flex items-center gap-2 min-w-0 w-64 shrink-0 ${currentTarget ? "opacity-60" : ""}`}>
-        <div
-          className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
-          style={{ backgroundColor: filament.color }}
-        />
-        <span className={`text-sm truncate ${currentTarget ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-300"}`}>
-          {filament.brand} {filament.name}
-        </span>
-        {filament.color && (
-          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono shrink-0">
-            {filament.color}
-          </span>
-        )}
-      </div>
-
-      {/* Arrow */}
-      <svg className="w-4 h-4 text-gray-300 dark:text-gray-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-      </svg>
-
-      {/* Target dropdown */}
-      <div className="relative flex-1 min-w-0" ref={dropdownRef}>
-        <button
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-          className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border cursor-pointer transition-colors ${
-            currentTarget
-              ? "border-amber-300 dark:border-amber-700 bg-white dark:bg-gray-800"
-              : "border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-500"
-          }`}
-        >
-          {targetFilament ? (
-            <>
-              <div
-                className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
-                style={{ backgroundColor: targetFilament.color }}
-              />
-              <span className="truncate text-gray-700 dark:text-gray-300">
-                {targetFilament.brand} {targetFilament.name}
-              </span>
-            </>
-          ) : (
-            <span className="text-gray-400 dark:text-gray-500">—</span>
-          )}
-          <svg className="w-3 h-3 text-gray-400 ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {dropdownOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl z-50 max-h-64 flex flex-col">
-            <div className="p-2 border-b border-gray-100 dark:border-gray-700">
-              <input
-                ref={inputRef}
-                type="text"
-                value={dropdownSearch}
-                onChange={(e) => setDropdownSearch(e.target.value)}
-                placeholder="Search..."
-                className="w-full px-2 py-1 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-              />
-            </div>
-            <div className="overflow-y-auto">
-              {/* No substitution option */}
-              <button
-                onClick={() => { onSetSubstitution(fKey, null); setDropdownOpen(false); }}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer transition-colors ${
-                  !currentTarget
-                    ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400"
-                    : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
-                }`}
-              >
-                <span>—</span>
-                <span>No substitution</span>
-              </button>
-              {options.map((f) => {
-                const key = filamentKey(f);
-                const isSelected = currentTarget === key;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => { onSetSubstitution(fKey, key); setDropdownOpen(false); }}
-                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer transition-colors ${
-                      isSelected
-                        ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 font-medium"
-                        : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                    }`}
-                  >
-                    <div
-                      className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
-                      style={{ backgroundColor: f.color }}
-                    />
-                    <span className="truncate">{f.brand} {f.name}</span>
-                    {f.color && (
-                      <span className="text-[10px] text-gray-400 font-mono shrink-0">{f.color}</span>
-                    )}
-                  </button>
-                );
-              })}
-              {options.length === 0 && (
-                <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No matches</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+    <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/10 flex items-center gap-2">
+      <input ref={inputRef} value={brand} onChange={e => setBrand(e.target.value)} placeholder="Brand" className="w-24 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+      <input value={line} onChange={e => setLine(e.target.value)} placeholder="Line" className="w-20 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+      <input value={material} onChange={e => setMaterial(e.target.value)} placeholder="Material" className="w-16 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="Name *" className="w-28 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+      <input value={color} onChange={e => setColor(e.target.value)} placeholder="#hex" className="w-20 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" />
+      <input value={td} onChange={e => setTd(e.target.value)} placeholder="TD" className="w-14 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" />
+      <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
+        <input type="checkbox" checked={owned} onChange={e => setOwned(e.target.checked)} className="rounded" />
+        Own
+      </label>
+      <button
+        onClick={() => {
+          if (!name.trim() || !brand.trim()) return;
+          onAdd({ brand, line: line || undefined, material: material || undefined, name, color: color || undefined, transmission_distance: td ? parseFloat(td) : undefined, owned });
+        }}
+        className="text-xs px-2 py-1 rounded bg-indigo-500 text-white hover:bg-indigo-600 cursor-pointer"
+      >Save</button>
+      <button onClick={onCancel} className="text-xs px-2 py-1 rounded text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
     </div>
+  );
+}
+
+function EditFilamentRow({ filament, onSave, onCancel }: {
+  filament: CuratedFilament;
+  onSave: (updates: { brand?: string; line?: string; material?: string; name?: string; color?: string; transmission_distance?: number; owned?: boolean }) => void;
+  onCancel: () => void;
+}) {
+  const [brand, setBrand] = useState(filament.brand);
+  const [line, setLine] = useState(filament.line);
+  const [material, setMaterial] = useState(filament.material);
+  const [name, setName] = useState(filament.name);
+  const [color, setColor] = useState(filament.color);
+  const [td, setTd] = useState(filament.transmission_distance?.toString() ?? "");
+  const [owned, setOwned] = useState(filament.owned);
+
+  return (
+    <tr className="bg-indigo-50 dark:bg-indigo-900/10">
+      <td className="px-3 py-2">
+        <input value={color} onChange={e => setColor(e.target.value)} className="w-16 px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" />
+      </td>
+      <td className="px-3 py-2"><input value={brand} onChange={e => setBrand(e.target.value)} className="w-full px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" /></td>
+      <td className="px-3 py-2"><input value={line} onChange={e => setLine(e.target.value)} className="w-full px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" /></td>
+      <td className="px-3 py-2"><input value={material} onChange={e => setMaterial(e.target.value)} className="w-full px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" /></td>
+      <td className="px-3 py-2"><input value={name} onChange={e => setName(e.target.value)} className="w-full px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" /></td>
+      <td className="px-3 py-2"><input value={td} onChange={e => setTd(e.target.value)} className="w-14 px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" /></td>
+      <td className="px-3 py-2 text-center">
+        <input type="checkbox" checked={owned} onChange={e => setOwned(e.target.checked)} className="rounded cursor-pointer" />
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex gap-1">
+          <button
+            onClick={() => onSave({ brand, line, material, name, color, transmission_distance: td ? parseFloat(td) : undefined, owned })}
+            className="text-xs px-1.5 py-0.5 rounded bg-indigo-500 text-white hover:bg-indigo-600 cursor-pointer"
+          >Save</button>
+          <button onClick={onCancel} className="text-xs px-1.5 py-0.5 text-gray-500 cursor-pointer">X</button>
+        </div>
+      </td>
+    </tr>
   );
 }

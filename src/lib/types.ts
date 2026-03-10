@@ -7,6 +7,9 @@ export interface Project {
   updated_at: string;
   tags: Tag[];
   collections: CollectionSummary[];
+  print_width_mm: number | null;
+  print_height_mm: number | null;
+  print_time_mins: number | null;
 }
 
 export interface ProjectSummary {
@@ -17,7 +20,7 @@ export interface ProjectSummary {
   updated_at: string;
   tags: Tag[];
   file_count: number;
-  filaments: ResolvedFilament[];
+  filaments: ProjectFilamentDisplay[];
   size: string | null;
 }
 
@@ -46,26 +49,46 @@ export interface CollectionSummary {
   name: string;
 }
 
+export interface CuratedFilament {
+  id: string;
+  brand: string;
+  line: string;
+  material: string;
+  name: string;
+  color: string;
+  transmission_distance: number | null;
+  owned: boolean;
+  source_uuid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CuratedFilamentWithCount extends CuratedFilament {
+  project_count: number;
+}
+
+export interface ProjectFilamentDisplay {
+  project_filament_id: string;
+  curated_filament_id: string | null;
+  color: string;
+  name: string;
+  brand: string;
+  line: string;
+  material: string;
+  match_status: "exact" | "guessed" | "unmatched" | "confirmed";
+  owned: boolean;
+  td: number | null;
+  parsed_color: string;
+  parsed_brand: string;
+  parsed_name: string;
+  parsed_td: number | null;
+  is_manual: boolean;
+}
+
 export interface FilamentInfo {
   color: string;
   name: string;
   brand: string;
-}
-
-export interface ResolvedFilament {
-  current: FilamentInfo;
-  original: FilamentInfo | null;  // non-null if this was substituted
-}
-
-export interface FilamentSubstitution {
-  from_key: string;
-  from: FilamentInfo;
-  to_key: string;
-  to: FilamentInfo;
-}
-
-export function filamentKey(f: FilamentInfo): string {
-  return `${f.color.toLowerCase()}|${f.brand}|${f.name}`;
 }
 
 export interface FileMetadata {
@@ -100,12 +123,14 @@ export interface ListProjectsRequest {
   search?: string;
   tag_ids?: string[];
   collection_id?: string;
-  filaments?: string[];
+  filament_ids?: string[];
   size?: string;
   exclude_tag_ids?: string[];
-  exclude_filaments?: string[];
+  exclude_filament_ids?: string[];
   exclude_sizes?: string[];
   no_filament?: "include" | "exclude";
+  owned_only?: boolean;
+  all_owned?: boolean;
   sort_by?: SortBy;
   sort_order?: SortOrder;
 }

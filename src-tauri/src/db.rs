@@ -1,8 +1,11 @@
 use crate::config;
+use crate::models::FilamentInfo;
 use rusqlite::{Connection, Result};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use uuid::Uuid;
 
 pub struct Database {
     conn: Mutex<Option<Connection>>,
@@ -28,8 +31,50 @@ impl Database {
         let conn = Connection::open(&db_path).expect("Failed to open database");
         conn.execute_batch("PRAGMA journal_mode=WAL;").expect("WAL mode");
         conn.execute_batch("PRAGMA foreign_keys=ON;").expect("foreign keys");
+
+        // Attach shared filaments database
+        let shared_path = Self::shared_filaments_db_path();
+        if let Some(parent) = shared_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create config directory");
+        }
+        conn.execute(
+            &format!("ATTACH DATABASE '{}' AS shared", shared_path.to_string_lossy().replace('\'', "''")),
+            [],
+        ).expect("Failed to attach shared filaments database");
+        conn.execute_batch("PRAGMA shared.journal_mode=WAL;").expect("shared WAL mode");
+        Self::run_shared_migrations(&conn).expect("shared migrations");
+
         Self::run_migrations_on(&conn).expect("migrations");
         conn
+    }
+
+    /// Path to the shared filaments database (in config dir, not per-library)
+    fn shared_filaments_db_path() -> PathBuf {
+        config::config_dir_path().join("filaments.sqlite")
+    }
+
+    /// Create curated_filaments table in the shared database
+    fn run_shared_migrations(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS shared.curated_filaments (
+                id TEXT PRIMARY KEY,
+                brand TEXT NOT NULL DEFAULT '',
+                line TEXT NOT NULL DEFAULT '',
+                material TEXT NOT NULL DEFAULT 'PLA',
+                name TEXT NOT NULL,
+                color TEXT NOT NULL DEFAULT '',
+                transmission_distance REAL,
+                owned INTEGER NOT NULL DEFAULT 0,
+                source_uuid TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS shared.idx_curated_brand_line_name
+                ON curated_filaments(LOWER(brand), LOWER(line), LOWER(name));
+            "
+        )?;
+        Ok(())
     }
 
     /// Close the current connection and open a new one for the active library.
@@ -275,6 +320,454 @@ impl Database {
             }
         }
 
+        // Migration: create project_filaments table (curated_filaments now lives in shared DB)
+        let has_project_filaments: bool = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='project_filaments'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        if !has_project_filaments {
+            conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS project_filaments (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    file_id TEXT NOT NULL,
+                    curated_filament_id TEXT,
+                    parsed_color TEXT NOT NULL DEFAULT '',
+                    parsed_brand TEXT NOT NULL DEFAULT '',
+                    parsed_name TEXT NOT NULL DEFAULT '',
+                    parsed_td REAL,
+                    match_status TEXT NOT NULL DEFAULT 'unmatched'
+                        CHECK(match_status IN ('exact', 'guessed', 'unmatched', 'confirmed')),
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+                );
+                "
+            )?;
+
+            // Data migration: extract filaments from existing file metadata into shared.curated_filaments
+            Self::migrate_filaments_to_curated(conn)?;
+        }
+
+        // Migration: move local curated_filaments to shared DB and rebuild
+        // project_filaments without FK to local curated_filaments.
+        // Must run with foreign_keys=OFF to avoid errors on missing table references.
+        let has_local_curated: bool = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='curated_filaments'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+
+        // Check if project_filaments still has FK to curated_filaments (old schema)
+        let pf_sql: String = conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='project_filaments'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or_default();
+        let needs_pf_rebuild = pf_sql.contains("REFERENCES curated_filaments");
+
+        if has_local_curated || needs_pf_rebuild {
+            conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+
+            if has_local_curated {
+                let shared_count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM shared.curated_filaments",
+                    [],
+                    |row| row.get(0),
+                ).unwrap_or(0);
+
+                if shared_count == 0 {
+                    conn.execute_batch(
+                        "INSERT OR IGNORE INTO shared.curated_filaments
+                         SELECT * FROM main.curated_filaments"
+                    )?;
+                }
+
+                conn.execute_batch("DROP TABLE IF EXISTS main.curated_filaments")?;
+            }
+
+            // Rebuild project_filaments without FK to curated_filaments
+            if needs_pf_rebuild {
+                conn.execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS project_filaments_new (
+                        id TEXT PRIMARY KEY,
+                        project_id TEXT NOT NULL,
+                        file_id TEXT NOT NULL,
+                        curated_filament_id TEXT,
+                        parsed_color TEXT NOT NULL DEFAULT '',
+                        parsed_brand TEXT NOT NULL DEFAULT '',
+                        parsed_name TEXT NOT NULL DEFAULT '',
+                        parsed_td REAL,
+                        match_status TEXT NOT NULL DEFAULT 'unmatched'
+                            CHECK(match_status IN ('exact', 'guessed', 'unmatched', 'confirmed')),
+                        is_manual INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                        FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+                    );
+                    INSERT OR IGNORE INTO project_filaments_new
+                        SELECT id, project_id, file_id, curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status,
+                               COALESCE(is_manual, 0) FROM project_filaments;
+                    DROP TABLE project_filaments;
+                    ALTER TABLE project_filaments_new RENAME TO project_filaments;
+                    "
+                )?;
+            }
+
+            conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        }
+
+        // If project_filaments have lost their curated_filament_id (e.g. from a prior
+        // migration that cascaded), re-run matching to restore references
+        let orphaned: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM project_filaments WHERE curated_filament_id IS NULL AND match_status != 'unmatched'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        if orphaned > 0 {
+            conn.execute(
+                "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched' WHERE curated_filament_id IS NULL AND match_status != 'unmatched'",
+                [],
+            )?;
+            Self::run_matching_all(conn)?;
+        }
+
+        // Migration: add is_manual column to project_filaments (for tables not yet rebuilt)
+        let has_is_manual = conn.prepare("SELECT is_manual FROM project_filaments LIMIT 0").is_ok();
+        if !has_is_manual {
+            conn.execute("ALTER TABLE project_filaments ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0", []).ok();
+        }
+
+        // Migration: add print info columns to projects
+        let has_print_width = conn.prepare("SELECT print_width_mm FROM projects LIMIT 0").is_ok();
+        if !has_print_width {
+            conn.execute("ALTER TABLE projects ADD COLUMN print_width_mm REAL", []).ok();
+            conn.execute("ALTER TABLE projects ADD COLUMN print_height_mm REAL", []).ok();
+            conn.execute("ALTER TABLE projects ADD COLUMN print_time_mins INTEGER", []).ok();
+        }
+
         Ok(())
+    }
+
+    /// Split compound brand like "BambuLab Basic" into (brand, line).
+    /// Known patterns: "BambuLab Basic", "BambuLab Matte", "Polymaker PolyTerra", etc.
+    pub fn split_brand_line(compound_brand: &str) -> (String, String) {
+        let parts: Vec<&str> = compound_brand.split_whitespace().collect();
+        if parts.len() >= 2 {
+            (parts[0].to_string(), parts[1..].join(" "))
+        } else {
+            (compound_brand.to_string(), String::new())
+        }
+    }
+
+    fn migrate_filaments_to_curated(conn: &Connection) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Extract unique filaments from file metadata
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT
+                json_extract(je.value, '$.color') as color,
+                json_extract(je.value, '$.name') as name,
+                json_extract(je.value, '$.brand') as brand
+            FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je
+            WHERE f.favorited = 1
+              AND json_extract(f.metadata, '$.filaments') IS NOT NULL"
+        )?;
+
+        let filaments: Vec<FilamentInfo> = stmt.query_map([], |row| {
+            Ok(FilamentInfo {
+                color: row.get::<_, String>(0).unwrap_or_default(),
+                name: row.get::<_, String>(1).unwrap_or_default(),
+                brand: row.get::<_, String>(2).unwrap_or_default(),
+            })
+        })?.filter_map(|r| r.ok()).collect();
+
+        let mut seen = HashSet::new();
+
+        for f in &filaments {
+            let (brand, line) = Self::split_brand_line(&f.brand);
+            let dedup_key = format!("{}|{}|{}", brand.to_lowercase(), line.to_lowercase(), f.name.to_lowercase());
+            if seen.contains(&dedup_key) { continue; }
+            seen.insert(dedup_key);
+
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT OR IGNORE INTO shared.curated_filaments (id, brand, line, material, name, color, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'PLA', ?4, ?5, ?6, ?7)",
+                rusqlite::params![id, brand, line, f.name, f.color, now, now],
+            )?;
+        }
+
+        // Create project_filaments for favorited files
+        let mut file_stmt = conn.prepare(
+            "SELECT f.id, f.project_id, f.metadata FROM files f WHERE f.favorited = 1 AND json_extract(f.metadata, '$.filaments') IS NOT NULL"
+        )?;
+
+        let file_rows: Vec<(String, String, String)> = file_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?.filter_map(|r| r.ok()).collect();
+
+        for (file_id, project_id, metadata_json) in &file_rows {
+            let metadata: serde_json::Value = match serde_json::from_str(metadata_json) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if let Some(arr) = metadata.get("filaments").and_then(|v| v.as_array()) {
+                for item in arr {
+                    let color = item.get("color").and_then(|v| v.as_str()).unwrap_or("");
+                    let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let brand_raw = item.get("brand").and_then(|v| v.as_str()).unwrap_or("");
+
+                    let pf_id = Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO project_filaments (id, project_id, file_id, parsed_color, parsed_brand, parsed_name, match_status)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unmatched')",
+                        rusqlite::params![pf_id, project_id, file_id, color, brand_raw, name],
+                    )?;
+                }
+            }
+        }
+
+        // Now run matching for all project_filaments
+        Self::run_matching_all(conn)?;
+
+        // Apply existing substitutions as confirmed matches
+        let subs = config::get_substitutions();
+        if !subs.is_empty() {
+            for (from_key, _) in &subs {
+                let resolved_key = config::resolve_filament_key(from_key, &subs);
+                if resolved_key == *from_key { continue; }
+                let (_tc, tb, tn) = config::parse_filament_key(&resolved_key);
+                let (target_brand, target_line) = Self::split_brand_line(&tb);
+
+                // Find the curated filament matching the target
+                let curated_id: Option<String> = conn.query_row(
+                    "SELECT id FROM shared.curated_filaments WHERE LOWER(brand) = LOWER(?1) AND LOWER(line) = LOWER(?2) AND LOWER(name) = LOWER(?3)",
+                    rusqlite::params![target_brand, target_line, tn],
+                    |row| row.get(0),
+                ).ok();
+
+                if let Some(cid) = curated_id {
+                    let (fc, _fb, fn_) = config::parse_filament_key(from_key);
+                    conn.execute(
+                        "UPDATE project_filaments SET curated_filament_id = ?1, match_status = 'confirmed'
+                         WHERE LOWER(parsed_color) = LOWER(?2) AND LOWER(parsed_name) = LOWER(?3) AND curated_filament_id IS NULL",
+                        rusqlite::params![cid, fc, fn_],
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn run_matching_all(conn: &Connection) -> Result<()> {
+        // Get all unmatched project_filaments
+        let mut stmt = conn.prepare(
+            "SELECT pf.id, pf.parsed_color, pf.parsed_brand, pf.parsed_name FROM project_filaments pf WHERE pf.match_status = 'unmatched'"
+        )?;
+        let unmatched: Vec<(String, String, String, String)> = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        })?.filter_map(|r| r.ok()).collect();
+
+        for (pf_id, parsed_color, parsed_brand, parsed_name) in &unmatched {
+            if let Some((curated_id, status)) = Self::find_match(conn, parsed_color, parsed_brand, parsed_name)? {
+                conn.execute(
+                    "UPDATE project_filaments SET curated_filament_id = ?1, match_status = ?2 WHERE id = ?3",
+                    rusqlite::params![curated_id, status, pf_id],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Strip material prefix and brand+line prefix from a parsed name.
+    /// e.g. "PLA BambuLab Basic Black" with brand "BambuLab" line "Basic" → "Black"
+    fn strip_name_prefixes(parsed_name: &str, brand: &str, line: &str, material: &str) -> String {
+        let mut name = parsed_name.to_string();
+
+        // Strip material prefix (e.g. "PLA ", "PETG ", "ABS ")
+        let name_lower = name.to_lowercase();
+        let mat_lower = material.to_lowercase();
+        if !mat_lower.is_empty() && name_lower.starts_with(&mat_lower) {
+            let rest = name[mat_lower.len()..].trim_start();
+            if !rest.is_empty() {
+                name = rest.to_string();
+            }
+        }
+
+        // Strip brand prefix
+        let name_lower = name.to_lowercase();
+        let brand_lower = brand.to_lowercase();
+        if !brand_lower.is_empty() && name_lower.starts_with(&brand_lower) {
+            let rest = name[brand_lower.len()..].trim_start();
+            if !rest.is_empty() {
+                name = rest.to_string();
+            }
+        }
+
+        // Strip line prefix
+        let name_lower = name.to_lowercase();
+        let line_lower = line.to_lowercase();
+        if !line_lower.is_empty() && name_lower.starts_with(&line_lower) {
+            let rest = name[line_lower.len()..].trim_start();
+            if !rest.is_empty() {
+                name = rest.to_string();
+            }
+        }
+
+        name
+    }
+
+    /// Common materials used as prefixes in HueForge filament names
+    const KNOWN_MATERIALS: &'static [&'static str] = &[
+        "PLA", "PETG", "ABS", "ASA", "TPU", "SILK", "PLA+", "PLA-CF", "PETG-CF",
+        "PA", "PA-CF", "PC", "PVA", "HIPS",
+    ];
+
+    /// Try to strip any known material prefix from a name
+    fn strip_any_material_prefix(parsed_name: &str) -> String {
+        let name_lower = parsed_name.to_lowercase();
+        for mat in Self::KNOWN_MATERIALS {
+            let mat_lower = mat.to_lowercase();
+            if name_lower.starts_with(&mat_lower) {
+                let rest = parsed_name[mat_lower.len()..].trim_start();
+                if !rest.is_empty() {
+                    return rest.to_string();
+                }
+            }
+        }
+        parsed_name.to_string()
+    }
+
+    /// Find a matching curated filament. Returns (curated_id, match_status).
+    pub fn find_match(conn: &Connection, parsed_color: &str, parsed_brand: &str, parsed_name: &str) -> Result<Option<(String, String)>> {
+        let (brand_part, _line_part) = Self::split_brand_line(parsed_brand);
+
+        // Build candidate name variants: original + stripped of known material prefix
+        let name_no_material = Self::strip_any_material_prefix(parsed_name);
+        let name_variants: Vec<&str> = if name_no_material != parsed_name {
+            vec![parsed_name, &name_no_material]
+        } else {
+            vec![parsed_name]
+        };
+
+        // 1. Exact match: brand matches AND name matches exactly
+        for name_var in &name_variants {
+            let exact: Option<String> = conn.query_row(
+                "SELECT id FROM shared.curated_filaments
+                 WHERE LOWER(brand) = LOWER(?1) AND LOWER(name) = LOWER(?2)
+                 LIMIT 1",
+                rusqlite::params![brand_part, name_var],
+                |row| row.get(0),
+            ).ok();
+            if let Some(id) = exact {
+                return Ok(Some((id, "exact".to_string())));
+            }
+
+            // Also try with concatenated brand+line matching parsed_brand
+            let exact2: Option<String> = conn.query_row(
+                "SELECT id FROM shared.curated_filaments
+                 WHERE LOWER(brand || ' ' || line) = LOWER(?1) AND LOWER(name) = LOWER(?2)
+                 LIMIT 1",
+                rusqlite::params![parsed_brand, name_var],
+                |row| row.get(0),
+            ).ok();
+            if let Some(id) = exact2 {
+                return Ok(Some((id, "exact".to_string())));
+            }
+        }
+
+        // 2. Fuzzy match: normalize brands, check name similarity
+        let normalized_brand = parsed_brand.to_lowercase().replace([' ', '-', '_'], "");
+        let mut fuzzy_stmt = conn.prepare(
+            "SELECT id, brand, line, name, material FROM shared.curated_filaments"
+        )?;
+        let candidates: Vec<(String, String, String, String, String)> = fuzzy_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?))
+        })?.filter_map(|r| r.ok()).collect();
+
+        for (cid, cbrand, cline, cname, cmaterial) in &candidates {
+            let curated_brand_norm = format!("{}{}", cbrand, cline).to_lowercase().replace([' ', '-', '_'], "");
+            if curated_brand_norm == normalized_brand || cbrand.to_lowercase() == brand_part.to_lowercase() {
+                // Try matching with progressively stripped parsed name
+                let stripped = Self::strip_name_prefixes(parsed_name, cbrand, cline, cmaterial);
+                let names_to_try = [parsed_name.to_string(), name_no_material.clone(), stripped];
+
+                for pn in &names_to_try {
+                    let pn_lower = pn.to_lowercase();
+                    let cn_lower = cname.to_lowercase();
+                    if pn_lower == cn_lower {
+                        return Ok(Some((cid.clone(), "exact".to_string())));
+                    }
+                    if pn_lower.contains(&cn_lower) || cn_lower.contains(&pn_lower) {
+                        return Ok(Some((cid.clone(), "guessed".to_string())));
+                    }
+                    if Self::edit_distance(&pn_lower, &cn_lower) <= 2 {
+                        return Ok(Some((cid.clone(), "guessed".to_string())));
+                    }
+                }
+            }
+        }
+
+        // 3. Color fallback: same brand, close color
+        if parsed_color.starts_with('#') && parsed_color.len() == 7 {
+            if let Some(parsed_rgb) = Self::hex_to_rgb(parsed_color) {
+                for (cid, cbrand, cline, _cname, _cmaterial) in &candidates {
+                    let curated_full_norm = format!("{}{}", cbrand, cline).to_lowercase().replace([' ', '-', '_'], "");
+                    let curated_brand_norm = cbrand.to_lowercase().replace([' ', '-', '_'], "");
+                    let brand_part_norm = brand_part.to_lowercase().replace([' ', '-', '_'], "");
+                    if curated_brand_norm != brand_part_norm && curated_full_norm != normalized_brand && curated_brand_norm != normalized_brand {
+                        continue;
+                    }
+                    let ccolor: String = conn.query_row(
+                        "SELECT color FROM shared.curated_filaments WHERE id = ?1",
+                        rusqlite::params![cid],
+                        |row| row.get(0),
+                    ).unwrap_or_default();
+                    if let Some(curated_rgb) = Self::hex_to_rgb(&ccolor) {
+                        let dist = Self::color_distance(&parsed_rgb, &curated_rgb);
+                        if dist < 30.0 {
+                            return Ok(Some((cid.clone(), "guessed".to_string())));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn hex_to_rgb(hex: &str) -> Option<(f64, f64, f64)> {
+        if hex.len() != 7 || !hex.starts_with('#') { return None; }
+        let r = u8::from_str_radix(&hex[1..3], 16).ok()? as f64;
+        let g = u8::from_str_radix(&hex[3..5], 16).ok()? as f64;
+        let b = u8::from_str_radix(&hex[5..7], 16).ok()? as f64;
+        Some((r, g, b))
+    }
+
+    fn color_distance(a: &(f64, f64, f64), b: &(f64, f64, f64)) -> f64 {
+        ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
+    }
+
+    fn edit_distance(a: &str, b: &str) -> usize {
+        let a_chars: Vec<char> = a.chars().collect();
+        let b_chars: Vec<char> = b.chars().collect();
+        let m = a_chars.len();
+        let n = b_chars.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut dp = vec![vec![0usize; n + 1]; m + 1];
+        for i in 0..=m { dp[i][0] = i; }
+        for j in 0..=n { dp[0][j] = j; }
+        for i in 1..=m {
+            for j in 1..=n {
+                let cost = if a_chars[i-1] == b_chars[j-1] { 0 } else { 1 };
+                dp[i][j] = (dp[i-1][j] + 1).min(dp[i][j-1] + 1).min(dp[i-1][j-1] + cost);
+            }
+        }
+        dp[m][n]
     }
 }

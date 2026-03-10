@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { listTags, listCollections, listAllFilaments, listAllSizes } from "../lib/api";
-import type { TagWithCount, Collection, FilamentInfo } from "../lib/types";
-import { filamentKey } from "../lib/types";
+import { listTags, listCollections, listUsedCuratedFilaments, listAllSizes } from "../lib/api";
+import type { TagWithCount, Collection, CuratedFilamentWithCount } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
 import { onDragMouseDown } from "../hooks/useDrag";
@@ -39,6 +38,10 @@ interface SidebarProps {
   onSizeChange: (size: string | undefined) => void;
   excludedSizes: string[];
   onExcludedSizesChange: (sizes: string[]) => void;
+  ownedOnly: boolean;
+  onOwnedOnlyChange: (v: boolean) => void;
+  allOwned: boolean;
+  onAllOwnedChange: (v: boolean) => void;
   refreshKey?: number;
   hasSearch?: boolean;
   onClearAll?: () => void;
@@ -61,17 +64,22 @@ export default function Sidebar({
   onSizeChange,
   excludedSizes,
   onExcludedSizesChange,
+  ownedOnly,
+  onOwnedOnlyChange,
+  allOwned,
+  onAllOwnedChange,
   refreshKey,
   hasSearch,
   onClearAll,
 }: SidebarProps) {
   const [tags, setTags] = useState<TagWithCount[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [filaments, setFilaments] = useState<FilamentInfo[]>([]);
+  const [filaments, setFilaments] = useState<CuratedFilamentWithCount[]>([]);
   const [sizes, setSizes] = useState<string[]>([]);
   const [showTagManager, setShowTagManager] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(loadCollapsed);
+  const [filamentSearch, setFilamentSearch] = useState("");
 
   function toggleSection(key: SectionKey) {
     setCollapsed((prev) => {
@@ -83,7 +91,7 @@ export default function Sidebar({
 
   const loadFilters = useCallback(async () => {
     const [t, c, fl, sz] = await Promise.all([
-      listTags(), listCollections(), listAllFilaments(), listAllSizes(),
+      listTags(), listCollections(), listUsedCuratedFilaments(), listAllSizes(),
     ]);
     setTags(t);
     setCollections(c);
@@ -96,7 +104,6 @@ export default function Sidebar({
   }, [loadFilters, refreshKey]);
 
   function toggleTag(id: string) {
-    // If excluded, remove exclusion first
     if (excludedTags.includes(id)) {
       onExcludedTagsChange(excludedTags.filter((t) => t !== id));
       return;
@@ -109,7 +116,6 @@ export default function Sidebar({
   }
 
   function excludeTag(id: string) {
-    // If selected, remove selection first
     if (selectedTags.includes(id)) {
       onTagsChange(selectedTags.filter((t) => t !== id));
     }
@@ -120,15 +126,15 @@ export default function Sidebar({
     }
   }
 
-  function toggleFilament(key: string) {
-    if (excludedFilaments.includes(key)) {
-      onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== key));
+  function toggleFilament(id: string) {
+    if (excludedFilaments.includes(id)) {
+      onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== id));
       return;
     }
-    if (selectedFilaments.includes(key)) {
-      onFilamentsChange(selectedFilaments.filter((k) => k !== key));
+    if (selectedFilaments.includes(id)) {
+      onFilamentsChange(selectedFilaments.filter((k) => k !== id));
     } else {
-      onFilamentsChange([...selectedFilaments, key]);
+      onFilamentsChange([...selectedFilaments, id]);
     }
   }
 
@@ -155,14 +161,14 @@ export default function Sidebar({
     }
   }
 
-  function excludeFilament(key: string) {
-    if (selectedFilaments.includes(key)) {
-      onFilamentsChange(selectedFilaments.filter((k) => k !== key));
+  function excludeFilament(id: string) {
+    if (selectedFilaments.includes(id)) {
+      onFilamentsChange(selectedFilaments.filter((k) => k !== id));
     }
-    if (excludedFilaments.includes(key)) {
-      onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== key));
+    if (excludedFilaments.includes(id)) {
+      onExcludedFilamentsChange(excludedFilaments.filter((k) => k !== id));
     } else {
-      onExcludedFilamentsChange([...excludedFilaments, key]);
+      onExcludedFilamentsChange([...excludedFilaments, id]);
     }
   }
 
@@ -192,9 +198,19 @@ export default function Sidebar({
     onFilamentsChange([]);
     onExcludedFilamentsChange([]);
     onNoFilamentFilterChange(undefined);
+    onOwnedOnlyChange(false);
+    onAllOwnedChange(false);
     onSizeChange(undefined);
     onExcludedSizesChange([]);
   }
+
+  // Filter the curated filaments shown in sidebar by owned toggle and search
+  const displayFilaments = filaments.filter(f => {
+    if (ownedOnly && !f.owned) return false;
+    if (!filamentSearch) return true;
+    const q = filamentSearch.toLowerCase();
+    return f.brand.toLowerCase().includes(q) || f.name.toLowerCase().includes(q) || f.line.toLowerCase().includes(q);
+  });
 
   const hasFilters =
     hasSearch ||
@@ -204,7 +220,9 @@ export default function Sidebar({
     selectedFilaments.length > 0 ||
     excludedFilaments.length > 0 ||
     selectedSize !== undefined ||
-    excludedSizes.length > 0;
+    excludedSizes.length > 0 ||
+    ownedOnly ||
+    allOwned;
 
   return (
     <>
@@ -320,33 +338,35 @@ export default function Sidebar({
                 </button>
               </p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <ul className="space-y-0.5">
                 {tags.map((t) => {
+                  const isActive = selectedTags.includes(t.id);
                   const isExcluded = excludedTags.includes(t.id);
                   return (
-                    <button
-                      key={t.id}
-                      onClick={() => toggleTag(t.id)}
-                      onContextMenu={(e) => { e.preventDefault(); excludeTag(t.id); }}
-                      className={`text-xs px-2 py-0.5 rounded-full transition-all cursor-pointer border ${
-                        isExcluded
-                          ? "line-through !text-gray-400 dark:!text-gray-500 !bg-gray-100 dark:!bg-gray-800 !border-gray-300 dark:!border-gray-600 opacity-60"
-                          : selectedTags.includes(t.id)
-                            ? "ring-2 ring-offset-1 ring-indigo-400"
-                            : "opacity-70 hover:opacity-100"
-                      }`}
-                      style={isExcluded ? {} : {
-                        backgroundColor: t.color + "22",
-                        borderColor: t.color,
-                        color: t.color,
-                      }}
-                    >
-                      {t.name}
-                      <span className="ml-0.5 opacity-60">{t.project_count}</span>
-                    </button>
+                    <li key={t.id}>
+                      <button
+                        onClick={() => toggleTag(t.id)}
+                        onContextMenu={(e) => { e.preventDefault(); excludeTag(t.id); }}
+                        className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
+                          isExcluded
+                            ? "text-gray-400 dark:text-gray-500 line-through opacity-60"
+                            : isActive
+                              ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
+                              : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
+                        }`}
+                        title={`${t.name} — Right-click to exclude`}
+                      >
+                        <span
+                          className={`w-3 h-3 rounded-full shrink-0 border ${isExcluded ? "opacity-40" : ""}`}
+                          style={{ backgroundColor: t.color || "#ccc", borderColor: t.color || "#ccc" }}
+                        />
+                        <span className="truncate">{t.name}</span>
+                        <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{t.project_count}</span>
+                      </button>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )
           )}
         </div>
@@ -366,7 +386,44 @@ export default function Sidebar({
               </h3>
             </button>
             {!collapsed.filaments && (
+              <>
+              {/* Owned toggles */}
+              <div className="flex gap-1 mb-1 w-full">
+                <button
+                  onClick={() => { if (ownedOnly && allOwned) onAllOwnedChange(false); onOwnedOnlyChange(!ownedOnly); }}
+                  className={`flex-1 text-[10px] px-2 py-0.5 rounded cursor-pointer transition-all border ${
+                    ownedOnly
+                      ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-600 font-medium"
+                      : "text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
+                  }`}
+                >
+                  Owned
+                </button>
+                <button
+                  onClick={() => ownedOnly && onAllOwnedChange(!allOwned)}
+                  className={`flex-1 text-[10px] px-2 py-0.5 rounded transition-all border ${
+                    !ownedOnly
+                      ? "text-gray-300 dark:text-gray-600 border-gray-200 dark:border-gray-700 cursor-not-allowed"
+                      : allOwned
+                        ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-600 font-medium cursor-pointer"
+                        : "text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer"
+                  }`}
+                  title={ownedOnly ? "Show only projects where all filaments are owned" : "Enable 'Owned' first"}
+                >
+                  Strict
+                </button>
+              </div>
+              {filaments.length > 5 && (
+                <input
+                  type="text"
+                  value={filamentSearch}
+                  onChange={(e) => setFilamentSearch(e.target.value)}
+                  placeholder="Filter filaments..."
+                  className="w-full px-2 py-1 mb-1 text-xs bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+              )}
               <ul className="space-y-0.5">
+                {!filamentSearch && (
                 <li>
                   <button
                     onClick={toggleNoFilament}
@@ -386,15 +443,15 @@ export default function Sidebar({
                     <span className="truncate italic">No filament</span>
                   </button>
                 </li>
-                {filaments.map((f) => {
-                  const key = filamentKey(f);
-                  const isActive = selectedFilaments.includes(key);
-                  const isExcluded = excludedFilaments.includes(key);
+                )}
+                {displayFilaments.map((f) => {
+                  const isActive = selectedFilaments.includes(f.id);
+                  const isExcluded = excludedFilaments.includes(f.id);
                   return (
-                    <li key={key}>
+                    <li key={f.id}>
                       <button
-                        onClick={() => toggleFilament(key)}
-                        onContextMenu={(e) => { e.preventDefault(); excludeFilament(key); }}
+                        onClick={() => toggleFilament(f.id)}
+                        onContextMenu={(e) => { e.preventDefault(); excludeFilament(f.id); }}
                         className={`w-full flex items-center gap-2 text-xs px-2 py-1 rounded cursor-pointer transition-colors ${
                           isExcluded
                             ? "text-gray-400 dark:text-gray-500 line-through opacity-60"
@@ -402,18 +459,23 @@ export default function Sidebar({
                               ? "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
                               : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800"
                         }`}
-                        title={`${f.brand} ${f.name} (${f.color}) — Right-click to exclude`}
+                        title={`${f.brand} ${f.line} ${f.name} (${f.color})${f.owned ? " — Owned" : ""} — Right-click to exclude`}
                       >
                         <span
                           className={`w-3 h-3 rounded-full shrink-0 border border-gray-300 dark:border-gray-500 ${isExcluded ? "opacity-40" : ""}`}
-                          style={{ backgroundColor: f.color }}
+                          style={{ backgroundColor: f.color || "#ccc" }}
                         />
                         <span className="truncate">{f.brand} {f.name}</span>
+                        {f.owned && (
+                          <span className="text-[8px] text-green-600 dark:text-green-400 shrink-0">&#10003;</span>
+                        )}
+                        <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500 shrink-0">{f.project_count}</span>
                       </button>
                     </li>
                   );
                 })}
               </ul>
+              </>
             )}
           </div>
         )}

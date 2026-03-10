@@ -54,6 +54,9 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
         updated_at: now,
         tags: vec![],
         collections: vec![],
+        print_width_mm: None,
+        print_height_mm: None,
+        print_time_mins: None,
     })
 }
 
@@ -63,7 +66,7 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
     let conn = conn.as_ref().unwrap();
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, thumbnail_path, created_at, updated_at FROM projects WHERE id = ?1"
+        "SELECT id, name, description, thumbnail_path, created_at, updated_at, print_width_mm, print_height_mm, print_time_mins FROM projects WHERE id = ?1"
     ).map_err(map_err)?;
 
     let project = stmt.query_row(rusqlite::params![id], |row| {
@@ -76,6 +79,9 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
             updated_at: row.get(5)?,
             tags: vec![],
             collections: vec![],
+            print_width_mm: row.get(6)?,
+            print_height_mm: row.get(7)?,
+            print_time_mins: row.get(8)?,
         })
     }).map_err(map_err)?;
 
@@ -98,6 +104,18 @@ pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest
     if let Some(description) = &req.description {
         conn.execute("UPDATE projects SET description = ?1, updated_at = ?2 WHERE id = ?3",
             rusqlite::params![description, now, id]).map_err(map_err)?;
+    }
+    if let Some(w) = &req.print_width_mm {
+        conn.execute("UPDATE projects SET print_width_mm = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![w, now, id]).map_err(map_err)?;
+    }
+    if let Some(h) = &req.print_height_mm {
+        conn.execute("UPDATE projects SET print_height_mm = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![h, now, id]).map_err(map_err)?;
+    }
+    if let Some(t) = &req.print_time_mins {
+        conn.execute("UPDATE projects SET print_time_mins = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![t, now, id]).map_err(map_err)?;
     }
     Ok(())
 }
@@ -131,18 +149,18 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
     let now = Utc::now().to_rfc3339();
 
     // Get source project
-    let (name, description): (String, String) = conn.query_row(
-        "SELECT name, description FROM projects WHERE id = ?1",
+    let (name, description, pw, ph, pt): (String, String, Option<f64>, Option<f64>, Option<i64>) = conn.query_row(
+        "SELECT name, description, print_width_mm, print_height_mm, print_time_mins FROM projects WHERE id = ?1",
         rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     ).map_err(map_err)?;
 
     let new_name = format!("{} (Copy)", name);
 
     // Create new project
     conn.execute(
-        "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![new_id, new_name, description, now, now],
+        "INSERT INTO projects (id, name, description, print_width_mm, print_height_mm, print_time_mins, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![new_id, new_name, description, pw, ph, pt, now, now],
     ).map_err(map_err)?;
 
     // Create project directories
@@ -241,6 +259,9 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
         updated_at: now,
         tags,
         collections,
+        print_width_mm: pw,
+        print_height_mm: ph,
+        print_time_mins: pt,
     })
 }
 
@@ -291,30 +312,15 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Filter by filaments (format: ["color|brand|name", ...]) — AND logic, match by full key
-    // Also expands to include substituted filaments that resolve to the target
-    if let Some(filaments) = &req.filaments {
-        let subs = config::get_substitutions();
-        let reverse_map = config::build_reverse_substitution_map(&subs);
-        for filament in filaments {
-            // Collect all keys that should match: the target itself + any sources that resolve to it
-            let mut match_keys = vec![filament.clone()];
-            if let Some(sources) = reverse_map.get(filament) {
-                match_keys.extend(sources.clone());
-            }
-            let placeholders: Vec<String> = match_keys.iter().enumerate()
-                .map(|(i, _)| format!("?{}", param_idx + i))
-                .collect();
+    // Filter by curated filament IDs — AND logic
+    if let Some(filament_ids) = &req.filament_ids {
+        for fid in filament_ids {
             conditions.push(format!(
-                "p.id IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
-                 WHERE f.favorited = 1 AND (LOWER(json_extract(je.value, '$.color')) || '|' || \
-                 json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name')) IN ({}))",
-                placeholders.join(", ")
+                "p.id IN (SELECT pf.project_id FROM project_filaments pf WHERE pf.curated_filament_id = ?{})",
+                param_idx
             ));
-            for key in &match_keys {
-                params.push(Box::new(key.clone()));
-                param_idx += 1;
-            }
+            params.push(Box::new(fid.clone()));
+            param_idx += 1;
         }
     }
 
@@ -345,28 +351,15 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Exclude filaments (also excludes substituted sources)
-    if let Some(exclude_filaments) = &req.exclude_filaments {
-        let subs = config::get_substitutions();
-        let reverse_map = config::build_reverse_substitution_map(&subs);
-        for filament in exclude_filaments {
-            let mut match_keys = vec![filament.clone()];
-            if let Some(sources) = reverse_map.get(filament) {
-                match_keys.extend(sources.clone());
-            }
-            let placeholders: Vec<String> = match_keys.iter().enumerate()
-                .map(|(i, _)| format!("?{}", param_idx + i))
-                .collect();
+    // Exclude filaments by curated IDs
+    if let Some(exclude_filament_ids) = &req.exclude_filament_ids {
+        for fid in exclude_filament_ids {
             conditions.push(format!(
-                "p.id NOT IN (SELECT f.project_id FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je \
-                 WHERE f.favorited = 1 AND (LOWER(json_extract(je.value, '$.color')) || '|' || \
-                 json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name')) IN ({}))",
-                placeholders.join(", ")
+                "p.id NOT IN (SELECT pf.project_id FROM project_filaments pf WHERE pf.curated_filament_id = ?{})",
+                param_idx
             ));
-            for key in &match_keys {
-                params.push(Box::new(key.clone()));
-                param_idx += 1;
-            }
+            params.push(Box::new(fid.clone()));
+            param_idx += 1;
         }
     }
 
@@ -385,16 +378,32 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // No-filament filter: projects with no filament metadata on any favorited file
+    // No-filament filter: projects with no project_filaments
     if let Some(no_filament) = &req.no_filament {
-        let no_filament_condition = "p.id NOT IN (SELECT DISTINCT f.project_id FROM files f \
-            WHERE f.favorited = 1 AND json_extract(f.metadata, '$.filaments') IS NOT NULL \
-            AND json_array_length(json_extract(f.metadata, '$.filaments')) > 0)";
+        let no_filament_condition = "p.id NOT IN (SELECT DISTINCT pf.project_id FROM project_filaments pf)";
         match no_filament.as_str() {
             "include" => conditions.push(no_filament_condition.to_string()),
             "exclude" => conditions.push(format!("NOT ({})", no_filament_condition)),
             _ => {}
         }
+    }
+
+    // owned_only: show only projects where at least one filament is owned
+    if req.owned_only.unwrap_or(false) {
+        conditions.push(
+            "p.id IN (SELECT pf.project_id FROM project_filaments pf \
+             JOIN shared.curated_filaments cf ON pf.curated_filament_id = cf.id WHERE cf.owned = 1)".to_string()
+        );
+    }
+
+    // all_owned: show only projects where ALL filaments are owned
+    if req.all_owned.unwrap_or(false) {
+        conditions.push(
+            "p.id IN (SELECT pf.project_id FROM project_filaments pf) AND \
+             p.id NOT IN (SELECT pf.project_id FROM project_filaments pf \
+             LEFT JOIN shared.curated_filaments cf ON pf.curated_filament_id = cf.id \
+             WHERE cf.id IS NULL OR cf.owned = 0)".to_string()
+        );
     }
 
     let _ = param_idx; // suppress unused warning
@@ -830,9 +839,74 @@ pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<b
             rusqlite::params![metadata_json, file_id],
         ).map_err(map_err)?;
 
+        // Get project_id for this file
+        let project_id: String = conn.query_row(
+            "SELECT project_id FROM files WHERE id = ?1",
+            rusqlite::params![file_id],
+            |row| row.get(0),
+        ).map_err(map_err)?;
+
+        let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+        let is_3mf = ext == "3mf";
+        let is_hfp_or_txt = ext == "hfp" || ext == "txt";
+
+        // Insert project_filaments and run matching
+        if let Some(ref filaments) = metadata.filaments {
+            if !filaments.is_empty() {
+                let mut should_add = true;
+
+                if is_3mf {
+                    // Only add 3mf filaments if no hfp/txt filaments exist for this project
+                    let has_hfp_txt_filaments: bool = conn.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM project_filaments pf
+                         JOIN files f ON pf.file_id = f.id
+                         WHERE pf.project_id = ?1 AND pf.is_manual = 0
+                         AND (LOWER(f.original_filename) LIKE '%.hfp' OR LOWER(f.original_filename) LIKE '%.txt'))",
+                        rusqlite::params![project_id],
+                        |row| row.get(0),
+                    ).unwrap_or(false);
+                    if has_hfp_txt_filaments {
+                        should_add = false;
+                    }
+                }
+
+                if is_hfp_or_txt {
+                    // Remove any 3mf-sourced filaments from this project
+                    conn.execute(
+                        "DELETE FROM project_filaments WHERE project_id = ?1 AND is_manual = 0
+                         AND file_id IN (SELECT id FROM files WHERE project_id = ?1 AND LOWER(original_filename) LIKE '%.3mf')",
+                        rusqlite::params![project_id],
+                    ).map_err(map_err)?;
+                }
+
+                if should_add {
+                    for f in filaments {
+                        let pf_id = Uuid::new_v4().to_string();
+                        conn.execute(
+                            "INSERT INTO project_filaments (id, project_id, file_id, parsed_color, parsed_brand, parsed_name, match_status)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unmatched')",
+                            rusqlite::params![pf_id, project_id, file_id, f.color, f.brand, f.name],
+                        ).map_err(map_err)?;
+
+                        if let Some((curated_id, status)) = Database::find_match(conn, &f.color, &f.brand, &f.name).map_err(map_err)? {
+                            conn.execute(
+                                "UPDATE project_filaments SET curated_filament_id = ?1, match_status = ?2 WHERE id = ?3",
+                                rusqlite::params![curated_id, status, pf_id],
+                            ).map_err(map_err)?;
+                        }
+                    }
+                }
+            }
+        }
+
     } else {
         conn.execute(
             "UPDATE files SET favorited = 0, metadata = '{}' WHERE id = ?1",
+            rusqlite::params![file_id],
+        ).map_err(map_err)?;
+        // Remove project_filaments for this file
+        conn.execute(
+            "DELETE FROM project_filaments WHERE file_id = ?1",
             rusqlite::params![file_id],
         ).map_err(map_err)?;
     }
@@ -845,6 +919,7 @@ fn parse_file_metadata(file_path: &str, filename: &str) -> FileMetadata {
     match ext.as_str() {
         "txt" => parse_hueforge_txt(file_path),
         "hfp" => parse_hueforge_hfp(file_path),
+        "3mf" => parse_3mf(file_path),
         _ => FileMetadata::default(),
     }
 }
@@ -853,8 +928,18 @@ fn parse_file_metadata(file_path: &str, filename: &str) -> FileMetadata {
 /// "PLA BambuLab Basic Red  Transmission Distance: 4"
 /// Returns e.g. ("BambuLab Basic", "Red")
 fn parse_filament_name(s: &str) -> (String, String) {
-    // Strip everything from "Transmission Distance" onward
+    // Strip everything from "Transmission Distance" or "— TD:" / "TD:" onward
     let name_part = if let Some(idx) = s.find("Transmission Distance") {
+        s[..idx].trim()
+    } else if let Some(idx) = s.find("\u{2014} TD:") {  // em-dash
+        s[..idx].trim()
+    } else if let Some(idx) = s.find("\u{2013} TD:") {  // en-dash
+        s[..idx].trim()
+    } else if let Some(idx) = s.find("- TD:") {
+        s[..idx].trim()
+    } else if let Some(idx) = s.find("(TD:") {
+        s[..idx].trim()
+    } else if let Some(idx) = s.find("TD:") {
         s[..idx].trim()
     } else {
         s.trim()
@@ -974,13 +1059,22 @@ fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
         let trimmed = line.trim();
 
         // Track filaments section
-        if trimmed.starts_with("Filaments Used:") || trimmed.starts_with("Filaments:") {
+        if trimmed.starts_with("Filaments Used") || trimmed.starts_with("Filaments:") {
             in_filaments_section = true;
+            // Extract count from "Filaments Used (4 total):"
+            if trimmed.contains("total") {
+                if let Some(num) = trimmed.split_whitespace()
+                    .find_map(|w| w.trim_start_matches('(').parse::<i32>().ok()) {
+                    filament_count = Some(num);
+                }
+            }
             continue;
         }
-        // Exit filaments section on blank line or new section
-        if in_filaments_section && (trimmed.is_empty() || trimmed.ends_with(':') || trimmed.starts_with("This print uses") || trimmed.starts_with("Swap ")) {
-            if !trimmed.starts_with("This print uses") {
+        // Exit filaments section on new section header (but not on blank lines, to handle
+        // formats with blank lines between filament entries)
+        if in_filaments_section && !trimmed.is_empty() {
+            let is_section_header = trimmed.ends_with(':') && !trimmed.contains("TD:");
+            if is_section_header || trimmed.starts_with("Swap ") {
                 in_filaments_section = false;
             }
         }
@@ -990,6 +1084,8 @@ fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
             let hex = &trimmed[..7];
             if hex.len() == 7 && hex[1..].chars().all(|c| c.is_ascii_hexdigit()) {
                 let rest = trimmed[7..].trim();
+                // Strip owned marker "* " if present
+                let rest = rest.strip_prefix("* ").unwrap_or(rest).trim();
                 let (brand, name) = parse_filament_name(rest);
                 if !filaments.iter().any(|f| f.color == hex && f.name == name) {
                     filaments.push(FilamentInfo {
@@ -1002,7 +1098,8 @@ fn parse_hueforge_txt(file_path: &str) -> FileMetadata {
         }
         // Parse filament lines without hex (older format):
         // "PLA BambuLab Basic Black Transmission Distance: 0.2"
-        else if in_filaments_section && trimmed.contains("Transmission Distance") {
+        // "PLA BambuLab Basic Black — TD: 0.6"
+        else if in_filaments_section && (trimmed.contains("Transmission Distance") || trimmed.contains("TD:")) {
             let (brand, name) = parse_filament_name(trimmed);
             if !name.is_empty() && !filaments.iter().any(|f| f.name == name && f.brand == brand) {
                 let color = guess_color_hex(&name);
@@ -1102,6 +1199,140 @@ fn parse_hueforge_hfp(file_path: &str) -> FileMetadata {
         height_mm,
         layer_height,
         max_thickness,
+    }
+}
+
+/// Parse a .3mf file (ZIP archive) to extract filament info and model size.
+/// Reads Metadata/project_settings.config (JSON) for filaments and layer height,
+/// and Metadata/plate_*.json for model bounding box dimensions.
+fn parse_3mf(file_path: &str) -> FileMetadata {
+    let file = match fs::File::open(file_path) {
+        Ok(f) => f,
+        Err(_) => return FileMetadata::default(),
+    };
+    let mut archive = match zip::ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(_) => return FileMetadata::default(),
+    };
+
+    let mut filaments: Vec<FilamentInfo> = Vec::new();
+    let mut layer_height = None;
+    let mut width_mm = None;
+    let mut height_mm = None;
+
+    // Parse project_settings.config for filament data
+    if let Ok(entry) = archive.by_name("Metadata/project_settings.config") {
+        if let Ok(settings) = serde_json::from_reader::<_, serde_json::Value>(entry) {
+            let colours = settings.get("filament_colour").and_then(|v| v.as_array());
+            let types = settings.get("filament_type").and_then(|v| v.as_array());
+            let vendors = settings.get("filament_vendor").and_then(|v| v.as_array());
+            let settings_ids = settings.get("filament_settings_id").and_then(|v| v.as_array());
+
+            if let Some(lh) = settings.get("layer_height").and_then(|v| v.as_f64()) {
+                layer_height = Some(lh);
+            }
+
+            if let Some(colours) = colours {
+                for (i, colour_val) in colours.iter().enumerate() {
+                    let color = colour_val.as_str().unwrap_or("").to_string();
+                    if color.is_empty() { continue; }
+
+                    let material = types.and_then(|a| a.get(i))
+                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let vendor = vendors.and_then(|a| a.get(i))
+                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                    // Extract brand+line from filament_settings_id like "Bambu PLA Basic @BBL X1C"
+                    // Format: "<brand> <material> <line> @<printer>"
+                    let settings_id = settings_ids.and_then(|a| a.get(i))
+                        .and_then(|v| v.as_str()).unwrap_or("");
+
+                    let (_brand, line) = parse_3mf_settings_id(settings_id, &vendor, &material);
+
+                    // Use vendor for brand (e.g. "Bambu Lab") and extracted line (e.g. "Basic")
+                    // The parsed_name will just be the color hex since 3mf doesn't have color names
+                    let full_brand = if line.is_empty() {
+                        vendor.clone()
+                    } else {
+                        format!("{} {}", vendor, line)
+                    };
+                    let name = color.clone();
+
+                    if !filaments.iter().any(|f| f.color == color) {
+                        filaments.push(FilamentInfo {
+                            color,
+                            name,
+                            brand: full_brand,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Parse plate JSON for model bounding box
+    for i in 0..archive.len() {
+        let entry_name = match archive.by_index(i) {
+            Ok(e) => e.name().to_string(),
+            Err(_) => continue,
+        };
+        if entry_name.starts_with("Metadata/plate_") && entry_name.ends_with(".json") {
+            if let Ok(entry) = archive.by_name(&entry_name) {
+                if let Ok(plate) = serde_json::from_reader::<_, serde_json::Value>(entry) {
+                    if let Some(bbox) = plate.get("bbox_all").and_then(|v| v.as_array()) {
+                        if bbox.len() == 4 {
+                            let x_min = bbox[0].as_f64().unwrap_or(0.0);
+                            let y_min = bbox[1].as_f64().unwrap_or(0.0);
+                            let x_max = bbox[2].as_f64().unwrap_or(0.0);
+                            let y_max = bbox[3].as_f64().unwrap_or(0.0);
+                            let w = (x_max - x_min).round();
+                            let h = (y_max - y_min).round();
+                            if w > 0.0 { width_mm = Some(w); }
+                            if h > 0.0 { height_mm = Some(h); }
+                        }
+                    }
+                }
+            }
+            break; // Only need the first plate
+        }
+    }
+
+    FileMetadata {
+        filament_count: if filaments.is_empty() { None } else { Some(filaments.len() as i32) },
+        filaments: if filaments.is_empty() { None } else { Some(filaments) },
+        width_mm,
+        height_mm,
+        layer_height,
+        max_thickness: None,
+    }
+}
+
+/// Parse filament_settings_id like "Bambu PLA Basic @BBL X1C" to extract (brand, line).
+/// Falls back to vendor name if settings_id can't be parsed.
+fn parse_3mf_settings_id(settings_id: &str, vendor: &str, material: &str) -> (String, String) {
+    // Strip everything after " @" (printer identifier)
+    let base = settings_id.split(" @").next().unwrap_or(settings_id).trim();
+
+    if base.is_empty() {
+        return (vendor.to_string(), String::new());
+    }
+
+    // base is like "Bambu PLA Basic" — strip material to get "Bambu Basic"
+    // But material might appear anywhere, so split into words and remove the material word
+    let mat_lower = material.to_lowercase();
+    let words: Vec<&str> = base.split_whitespace().collect();
+    let filtered: Vec<&str> = words.iter()
+        .filter(|w| w.to_lowercase() != mat_lower)
+        .copied()
+        .collect();
+
+    if filtered.len() >= 2 {
+        // First word is brand, rest is line
+        (filtered[0].to_string(), filtered[1..].join(" "))
+    } else if filtered.len() == 1 {
+        (filtered[0].to_string(), String::new())
+    } else {
+        (vendor.to_string(), String::new())
     }
 }
 
@@ -1296,46 +1527,8 @@ pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<
 // ── Filament & Size Filters ──
 
 #[tauri::command]
-pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
-    let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT color, name, brand FROM (
-            SELECT
-                json_extract(je.value, '$.color') as color,
-                json_extract(je.value, '$.name') as name,
-                json_extract(je.value, '$.brand') as brand,
-                ROW_NUMBER() OVER (PARTITION BY
-                    CASE WHEN COALESCE(json_extract(je.value, '$.color'), '') = ''
-                        THEN LOWER(json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name'))
-                        ELSE LOWER(json_extract(je.value, '$.color'))
-                    END
-                    ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
-            FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
-            WHERE files.favorited = 1
-              AND json_extract(files.metadata, '$.filaments') IS NOT NULL
-         ) WHERE rn = 1
-         ORDER BY brand, name"
-    ).map_err(map_err)?;
-
-    let raw: Vec<FilamentInfo> = stmt.query_map([], |row| {
-        Ok(FilamentInfo {
-            color: row.get(0)?,
-            name: row.get(1)?,
-            brand: row.get(2)?,
-        })
-    }).map_err(map_err)?.collect::<Result<Vec<_>, _>>().map_err(map_err)?;
-
-    // Filter out filaments that are sources of substitutions (they're merged into targets)
-    let subs = config::get_substitutions();
-    let filtered: Vec<FilamentInfo> = raw.into_iter()
-        .filter(|f| {
-            let key = config::filament_key(&f.color, &f.brand, &f.name);
-            !subs.contains_key(&key)
-        })
-        .collect();
-
-    Ok(filtered)
+pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilament>> {
+    list_curated_filaments(db)
 }
 
 #[tauri::command]
@@ -1357,65 +1550,401 @@ pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
     rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
 }
 
-// ── Filament Substitutions ──
+// ── Curated Filaments ──
 
 #[tauri::command]
-pub fn get_filament_substitutions() -> CmdResult<Vec<FilamentSubstitution>> {
-    let subs = config::get_substitutions();
-    let mut result = Vec::new();
-    for (from_key, _) in &subs {
-        let resolved_key = config::resolve_filament_key(from_key, &subs);
-        let (fc, fb, fn_) = config::parse_filament_key(from_key);
-        let (tc, tb, tn) = config::parse_filament_key(&resolved_key);
-        result.push(FilamentSubstitution {
-            from_key: from_key.clone(),
-            from: FilamentInfo { color: fc, name: fn_, brand: fb },
-            to_key: resolved_key,
-            to: FilamentInfo { color: tc, name: tn, brand: tb },
-        });
-    }
-    result.sort_by(|a, b| (&a.from.brand, &a.from.name).cmp(&(&b.from.brand, &b.from.name)));
-    Ok(result)
-}
-
-#[tauri::command]
-pub fn set_filament_substitution(from_key: String, to_key: Option<String>) -> CmdResult<()> {
-    config::set_substitution(from_key, to_key)
-}
-
-/// List all unique filaments from the active library (raw, without substitution filtering).
-/// Used by the filament management UI to show all available filaments.
-#[tauri::command]
-pub fn list_all_filaments_raw(db: State<Database>) -> CmdResult<Vec<FilamentInfo>> {
+pub fn list_curated_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilament>> {
     let conn = db.conn();
     let conn = conn.as_ref().unwrap();
     let mut stmt = conn.prepare(
-        "SELECT color, name, brand FROM (
-            SELECT
-                json_extract(je.value, '$.color') as color,
-                json_extract(je.value, '$.name') as name,
-                json_extract(je.value, '$.brand') as brand,
-                ROW_NUMBER() OVER (PARTITION BY
-                    CASE WHEN COALESCE(json_extract(je.value, '$.color'), '') = ''
-                        THEN LOWER(json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name'))
-                        ELSE LOWER(json_extract(je.value, '$.color'))
-                    END
-                    ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
-            FROM files, json_each(json_extract(files.metadata, '$.filaments')) AS je
-            WHERE files.favorited = 1
-              AND json_extract(files.metadata, '$.filaments') IS NOT NULL
-         ) WHERE rn = 1
-         ORDER BY brand, name"
+        "SELECT id, brand, line, material, name, color, transmission_distance, owned, source_uuid, created_at, updated_at
+         FROM shared.curated_filaments ORDER BY brand, line, name"
     ).map_err(map_err)?;
 
     let rows = stmt.query_map([], |row| {
-        Ok(FilamentInfo {
-            color: row.get(0)?,
-            name: row.get(1)?,
-            brand: row.get(2)?,
+        Ok(CuratedFilament {
+            id: row.get(0)?,
+            brand: row.get(1)?,
+            line: row.get(2)?,
+            material: row.get(3)?,
+            name: row.get(4)?,
+            color: row.get(5)?,
+            transmission_distance: row.get(6)?,
+            owned: row.get::<_, i32>(7)? != 0,
+            source_uuid: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     }).map_err(map_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn list_used_curated_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilamentWithCount>> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT cf.id, cf.brand, cf.line, cf.material, cf.name, cf.color, cf.transmission_distance, cf.owned, cf.source_uuid, cf.created_at, cf.updated_at,
+                COUNT(DISTINCT pf.project_id) as project_count
+         FROM shared.curated_filaments cf
+         INNER JOIN project_filaments pf ON pf.curated_filament_id = cf.id
+         GROUP BY cf.id
+         ORDER BY cf.brand, cf.line, cf.name"
+    ).map_err(map_err)?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(CuratedFilamentWithCount {
+            id: row.get(0)?,
+            brand: row.get(1)?,
+            line: row.get(2)?,
+            material: row.get(3)?,
+            name: row.get(4)?,
+            color: row.get(5)?,
+            transmission_distance: row.get(6)?,
+            owned: row.get::<_, i32>(7)? != 0,
+            source_uuid: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+            project_count: row.get(11)?,
+        })
+    }).map_err(map_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn create_curated_filament(db: State<Database>, req: CreateCuratedFilamentRequest) -> CmdResult<CuratedFilament> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let line = req.line.unwrap_or_default();
+    let material = req.material.unwrap_or_else(|| "PLA".to_string());
+    let color = req.color.unwrap_or_default();
+    let owned = req.owned.unwrap_or(false);
+
+    conn.execute(
+        "INSERT INTO shared.curated_filaments (id, brand, line, material, name, color, transmission_distance, owned, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            id, req.brand, line, material, req.name, color, req.transmission_distance,
+            if owned { 1 } else { 0 }, now, now
+        ],
+    ).map_err(map_err)?;
+
+    Ok(CuratedFilament {
+        id, brand: req.brand, line, material, name: req.name, color,
+        transmission_distance: req.transmission_distance,
+        owned, source_uuid: None,
+        created_at: now.clone(), updated_at: now,
+    })
+}
+
+#[tauri::command]
+pub fn update_curated_filament(db: State<Database>, id: String, req: UpdateCuratedFilamentRequest) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    let now = Utc::now().to_rfc3339();
+
+    if let Some(brand) = &req.brand {
+        conn.execute("UPDATE shared.curated_filaments SET brand = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![brand, now, id]).map_err(map_err)?;
+    }
+    if let Some(line) = &req.line {
+        conn.execute("UPDATE shared.curated_filaments SET line = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![line, now, id]).map_err(map_err)?;
+    }
+    if let Some(material) = &req.material {
+        conn.execute("UPDATE shared.curated_filaments SET material = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![material, now, id]).map_err(map_err)?;
+    }
+    if let Some(name) = &req.name {
+        conn.execute("UPDATE shared.curated_filaments SET name = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![name, now, id]).map_err(map_err)?;
+    }
+    if let Some(color) = &req.color {
+        conn.execute("UPDATE shared.curated_filaments SET color = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![color, now, id]).map_err(map_err)?;
+    }
+    if let Some(td) = req.transmission_distance {
+        conn.execute("UPDATE shared.curated_filaments SET transmission_distance = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![td, now, id]).map_err(map_err)?;
+    }
+    if let Some(owned) = req.owned {
+        conn.execute("UPDATE shared.curated_filaments SET owned = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![if owned { 1 } else { 0 }, now, id]).map_err(map_err)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_curated_filament(db: State<Database>, id: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    conn.execute("DELETE FROM shared.curated_filaments WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_curated_filaments(db: State<Database>, file_path: String) -> CmdResult<i32> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    let content = fs::read_to_string(&file_path).map_err(map_err)?;
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(map_err)?;
+
+    // Support both bare array and { "Filaments": [...] } wrapper
+    let arr = json.as_array()
+        .or_else(|| json.get("Filaments").and_then(|v| v.as_array()))
+        .ok_or("Expected JSON array or { \"Filaments\": [...] }")?;
+    let now = Utc::now().to_rfc3339();
+    let mut count = 0;
+
+    for item in arr {
+        // Skip IMAGE type entries (check both "Type" and "Material")
+        let material = item.get("Type").and_then(|v| v.as_str())
+            .or_else(|| item.get("Material").and_then(|v| v.as_str()))
+            .unwrap_or("PLA");
+        if material.eq_ignore_ascii_case("IMAGE") { continue; }
+
+        let brand_raw = item.get("Brand").and_then(|v| v.as_str()).unwrap_or("");
+        let name = item.get("Name").and_then(|v| v.as_str()).unwrap_or("");
+        let color = item.get("Color").and_then(|v| v.as_str()).unwrap_or("");
+        let td = item.get("Transmissivity").and_then(|v| v.as_f64())
+            .or_else(|| item.get("TD").and_then(|v| v.as_f64()))
+            .or_else(|| item.get("Transmission Distance").and_then(|v| v.as_f64()));
+        let uuid = item.get("uuid").and_then(|v| v.as_str())
+            .or_else(|| item.get("UUID").and_then(|v| v.as_str()));
+
+        if name.is_empty() { continue; }
+
+        let owned = item.get("Owned").and_then(|v| v.as_bool()).unwrap_or(false);
+        let (brand, line) = Database::split_brand_line(brand_raw);
+        let id = Uuid::new_v4().to_string();
+
+        let result = conn.execute(
+            "INSERT OR IGNORE INTO shared.curated_filaments (id, brand, line, material, name, color, transmission_distance, owned, source_uuid, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![id, brand, line, material, name, color, td, owned, uuid, now, now],
+        );
+        if let Ok(n) = result {
+            count += n as i32;
+        }
+    }
+
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn get_project_filaments_v2(db: State<Database>, project_id: String) -> CmdResult<Vec<ProjectFilamentDisplay>> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    get_project_filaments_display(conn, &project_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn match_project_filament(db: State<Database>, req: MatchFilamentRequest) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    conn.execute(
+        "UPDATE project_filaments SET curated_filament_id = ?1, match_status = 'confirmed' WHERE id = ?2",
+        rusqlite::params![req.curated_filament_id, req.project_filament_id],
+    ).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn unmatch_project_filament(db: State<Database>, project_filament_id: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    conn.execute(
+        "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched' WHERE id = ?1",
+        rusqlite::params![project_filament_id],
+    ).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rematch_all_project_filaments(db: State<Database>, project_id: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    // Reset all non-confirmed matches
+    conn.execute(
+        "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched' WHERE project_id = ?1 AND match_status != 'confirmed'",
+        rusqlite::params![project_id],
+    ).map_err(map_err)?;
+    Database::run_matching_all(conn).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rematch_unmatched_filaments(db: State<Database>) -> CmdResult<u32> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    let before: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM project_filaments WHERE match_status = 'unmatched'",
+        [],
+        |row| row.get(0),
+    ).map_err(map_err)?;
+    Database::run_matching_all(conn).map_err(map_err)?;
+    let after: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM project_filaments WHERE match_status = 'unmatched'",
+        [],
+        |row| row.get(0),
+    ).map_err(map_err)?;
+    Ok(before - after)
+}
+
+#[tauri::command]
+pub fn clear_all_curated_filaments(db: State<Database>) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    // Clear matches that reference curated filaments
+    conn.execute(
+        "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched'",
+        [],
+    ).map_err(map_err)?;
+    conn.execute("DELETE FROM shared.curated_filaments", []).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+
+    // Delete all non-manual project_filaments (preserve manually added ones)
+    conn.execute("DELETE FROM project_filaments WHERE is_manual = 0", []).map_err(map_err)?;
+
+    // Find all favorited files and re-parse their metadata
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, file_path, original_filename FROM files WHERE favorited = 1"
+    ).map_err(map_err)?;
+
+    let files: Vec<(String, String, String, String)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    }).map_err(map_err)?.filter_map(|r| r.ok()).collect();
+
+    // First pass: parse all files and update metadata, collect filament data
+    struct ParsedFile {
+        file_id: String,
+        project_id: String,
+        ext: String,
+        filaments: Vec<FilamentInfo>,
+    }
+    let mut parsed: Vec<ParsedFile> = Vec::new();
+    for (file_id, project_id, file_path, filename) in &files {
+        let metadata = parse_file_metadata(file_path, filename);
+        let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
+        conn.execute(
+            "UPDATE files SET metadata = ?1 WHERE id = ?2",
+            rusqlite::params![metadata_json, file_id],
+        ).map_err(map_err)?;
+
+        let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+        let filaments = metadata.filaments.unwrap_or_default();
+        parsed.push(ParsedFile { file_id: file_id.clone(), project_id: project_id.clone(), ext, filaments });
+    }
+
+    // Determine which projects have hfp/txt filament sources
+    let mut projects_with_hfp_txt = std::collections::HashSet::new();
+    for pf in &parsed {
+        if (pf.ext == "hfp" || pf.ext == "txt") && !pf.filaments.is_empty() {
+            projects_with_hfp_txt.insert(pf.project_id.clone());
+        }
+    }
+
+    // Second pass: insert filaments, skipping 3mf when hfp/txt exists
+    let mut added: u32 = 0;
+    for pf in &parsed {
+        if pf.filaments.is_empty() { continue; }
+        if pf.ext == "3mf" && projects_with_hfp_txt.contains(&pf.project_id) {
+            continue;
+        }
+        for f in &pf.filaments {
+            let pf_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO project_filaments (id, project_id, file_id, parsed_color, parsed_brand, parsed_name, match_status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unmatched')",
+                rusqlite::params![pf_id, pf.project_id, pf.file_id, f.color, f.brand, f.name],
+            ).map_err(map_err)?;
+            added += 1;
+        }
+    }
+
+    // Run matching on all unmatched
+    Database::run_matching_all(conn).map_err(map_err)?;
+
+    Ok(added)
+}
+
+// ── Manual Filament Management ──
+
+#[tauri::command]
+pub fn add_manual_project_filament(db: State<Database>, project_id: String, curated_filament_id: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+
+    // Look up the curated filament
+    let (color, brand, line, name, td): (String, String, String, String, Option<f64>) = conn.query_row(
+        "SELECT color, brand, line, name, transmission_distance FROM shared.curated_filaments WHERE id = ?1",
+        rusqlite::params![curated_filament_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    ).map_err(map_err)?;
+
+    let parsed_brand = if line.is_empty() { brand.clone() } else { format!("{} {}", brand, line) };
+    let pf_id = Uuid::new_v4().to_string();
+
+    conn.execute_batch("PRAGMA foreign_keys=OFF;").map_err(map_err)?;
+    let result = conn.execute(
+        "INSERT INTO project_filaments (id, project_id, file_id, curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual)
+         VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?7, 'confirmed', 1)",
+        rusqlite::params![pf_id, project_id, curated_filament_id, color, parsed_brand, name, td],
+    ).map_err(map_err);
+    conn.execute_batch("PRAGMA foreign_keys=ON;").map_err(map_err)?;
+    result?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_project_filament(db: State<Database>, project_filament_id: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    conn.execute(
+        "DELETE FROM project_filaments WHERE id = ?1",
+        rusqlite::params![project_filament_id],
+    ).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reset_project_filament(db: State<Database>, project_filament_id: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+
+    // Get the parsed values from the project_filament
+    let (parsed_color, parsed_brand, parsed_name): (String, String, String) = conn.query_row(
+        "SELECT parsed_color, parsed_brand, parsed_name FROM project_filaments WHERE id = ?1",
+        rusqlite::params![project_filament_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(map_err)?;
+
+    // Try to find a match
+    match Database::find_match(conn, &parsed_color, &parsed_brand, &parsed_name).map_err(map_err)? {
+        Some((curated_id, status)) => {
+            conn.execute(
+                "UPDATE project_filaments SET curated_filament_id = ?1, match_status = ?2 WHERE id = ?3",
+                rusqlite::params![curated_id, status, project_filament_id],
+            ).map_err(map_err)?;
+        }
+        None => {
+            conn.execute(
+                "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched' WHERE id = ?1",
+                rusqlite::params![project_filament_id],
+            ).map_err(map_err)?;
+        }
+    }
+
+    Ok(())
 }
 
 // ── Data Export ──
@@ -1658,57 +2187,56 @@ fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rus
     rows.collect()
 }
 
-fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<ResolvedFilament>, rusqlite::Error> {
+fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<ProjectFilamentDisplay>, rusqlite::Error> {
+    get_project_filaments_display(conn, project_id)
+}
+
+fn get_project_filaments_display(conn: &Connection, project_id: &str) -> Result<Vec<ProjectFilamentDisplay>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT color, name, brand FROM (
-            SELECT
-                json_extract(je.value, '$.color') as color,
-                json_extract(je.value, '$.name') as name,
-                json_extract(je.value, '$.brand') as brand,
-                ROW_NUMBER() OVER (PARTITION BY
-                    CASE WHEN COALESCE(json_extract(je.value, '$.color'), '') = ''
-                        THEN LOWER(json_extract(je.value, '$.brand') || '|' || json_extract(je.value, '$.name'))
-                        ELSE LOWER(json_extract(je.value, '$.color'))
-                    END
-                    ORDER BY LENGTH(json_extract(je.value, '$.name')) DESC) as rn
-            FROM files f, json_each(json_extract(f.metadata, '$.filaments')) AS je
-            WHERE f.project_id = ?1 AND f.favorited = 1
-              AND json_extract(f.metadata, '$.filaments') IS NOT NULL
-        ) WHERE rn = 1
-        ORDER BY brand, name"
+        "SELECT pf.id, pf.curated_filament_id, pf.parsed_color, pf.parsed_brand, pf.parsed_name, pf.parsed_td, pf.match_status,
+                cf.brand, cf.line, cf.material, cf.name, cf.color, cf.transmission_distance, cf.owned, pf.is_manual
+         FROM project_filaments pf
+         LEFT JOIN shared.curated_filaments cf ON pf.curated_filament_id = cf.id
+         WHERE pf.project_id = ?1
+         ORDER BY COALESCE(cf.brand, pf.parsed_brand), COALESCE(cf.name, pf.parsed_name)"
     )?;
-    let raw_filaments: Vec<FilamentInfo> = stmt.query_map(rusqlite::params![project_id], |row| {
-        Ok(FilamentInfo { color: row.get(0)?, name: row.get(1)?, brand: row.get(2)? })
-    })?.collect::<Result<Vec<_>, _>>()?;
 
-    let subs = config::get_substitutions();
+    let rows = stmt.query_map(rusqlite::params![project_id], |row| {
+        let curated_id: Option<String> = row.get(1)?;
+        let has_curated = curated_id.is_some();
+        Ok(ProjectFilamentDisplay {
+            project_filament_id: row.get(0)?,
+            curated_filament_id: curated_id,
+            parsed_color: row.get(2)?,
+            parsed_brand: row.get(3)?,
+            parsed_name: row.get(4)?,
+            parsed_td: row.get(5)?,
+            match_status: row.get(6)?,
+            brand: if has_curated { row.get::<_, String>(7).unwrap_or_default() } else { row.get::<_, String>(3).unwrap_or_default() },
+            line: if has_curated { row.get::<_, String>(8).unwrap_or_default() } else { String::new() },
+            material: if has_curated { row.get::<_, String>(9).unwrap_or_default() } else { String::from("PLA") },
+            name: if has_curated { row.get::<_, String>(10).unwrap_or_default() } else { row.get::<_, String>(4).unwrap_or_default() },
+            color: if has_curated { row.get::<_, String>(11).unwrap_or_default() } else { row.get::<_, String>(2).unwrap_or_default() },
+            td: if has_curated { row.get(12)? } else { row.get(5)? },
+            owned: if has_curated { row.get::<_, i32>(13).unwrap_or(0) != 0 } else { false },
+            is_manual: row.get::<_, i32>(14).unwrap_or(0) != 0,
+        })
+    })?;
+
+    // Deduplicate by curated_filament_id (or by parsed key for unmatched)
+    let all: Vec<ProjectFilamentDisplay> = rows.filter_map(|r| r.ok()).collect();
+    let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
-    let mut seen_keys = std::collections::HashSet::new();
-
-    for f in raw_filaments {
-        let key = config::filament_key(&f.color, &f.brand, &f.name);
-        let resolved_key = config::resolve_filament_key(&key, &subs);
-
-        if resolved_key != key {
-            // This filament has been substituted
-            let (color, brand, name) = config::parse_filament_key(&resolved_key);
-            let dedup_key = resolved_key.clone();
-            if seen_keys.contains(&dedup_key) { continue; }
-            seen_keys.insert(dedup_key);
-            result.push(ResolvedFilament {
-                current: FilamentInfo { color, name, brand },
-                original: Some(f),
-            });
+    for pf in all {
+        let dedup_key = if let Some(ref cid) = pf.curated_filament_id {
+            cid.clone()
         } else {
-            if seen_keys.contains(&key) { continue; }
-            seen_keys.insert(key);
-            result.push(ResolvedFilament {
-                current: f,
-                original: None,
-            });
-        }
+            format!("{}|{}|{}", pf.parsed_color.to_lowercase(), pf.parsed_brand, pf.parsed_name)
+        };
+        if seen.contains(&dedup_key) { continue; }
+        seen.insert(dedup_key);
+        result.push(pf);
     }
-
     Ok(result)
 }
 

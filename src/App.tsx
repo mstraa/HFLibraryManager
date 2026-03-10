@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, isFirstLaunch } from "./lib/api";
+import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch } from "./lib/api";
 import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
@@ -20,7 +20,7 @@ function App() {
   const [showWelcome, setShowWelcome] = useState<boolean | null>(null); // null = loading
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<SortBy>("updated_at");
+  const [sortBy, setSortBy] = useState<SortBy>("created_at");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [excludedTags, setExcludedTags] = useState<string[]>([]);
@@ -38,6 +38,8 @@ function App() {
     _setNoFilamentFilter(v);
     localStorage.setItem("no-filament-filter", v ?? "off");
   }, []);
+  const [ownedOnly, setOwnedOnly] = useState(false);
+  const [allOwned, setAllOwned] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const navHistoryRef = useRef<string[]>([]); // stack of previous project IDs
@@ -45,6 +47,10 @@ function App() {
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
+  const selectedTagsRef = useRef(selectedTags);
+  selectedTagsRef.current = selectedTags;
+  const selectedCollectionRef = useRef(selectedCollection);
+  selectedCollectionRef.current = selectedCollection;
   const [showSettings, setShowSettings] = useState(false);
   const [showFilamentManager, setShowFilamentManager] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -57,17 +63,19 @@ function App() {
       search: search || undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       collection_id: selectedCollection,
-      filaments: selectedFilaments.length > 0 ? selectedFilaments : undefined,
+      filament_ids: selectedFilaments.length > 0 ? selectedFilaments : undefined,
       size: selectedSize,
       exclude_tag_ids: excludedTags.length > 0 ? excludedTags : undefined,
-      exclude_filaments: excludedFilaments.length > 0 ? excludedFilaments : undefined,
+      exclude_filament_ids: excludedFilaments.length > 0 ? excludedFilaments : undefined,
       exclude_sizes: excludedSizes.length > 0 ? excludedSizes : undefined,
       no_filament: noFilamentFilter,
+      owned_only: ownedOnly || undefined,
+      all_owned: (ownedOnly && allOwned) || undefined,
       sort_by: sortBy,
       sort_order: sortOrder,
     });
     setProjects(result);
-  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, sortBy, sortOrder]);
+  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, ownedOnly, allOwned, sortBy, sortOrder]);
 
   // Check first launch
   useEffect(() => {
@@ -87,6 +95,15 @@ function App() {
     setImporting(!!importFolder);
     try {
       const project = await createProject(name, description || undefined);
+
+      // Append currently selected filter tags/collection to the new project
+      if (selectedTagsRef.current.length > 0) {
+        await setProjectTags(project.id, selectedTagsRef.current);
+      }
+      if (selectedCollectionRef.current) {
+        await addProjectToCollection(project.id, selectedCollectionRef.current);
+      }
+
       if (importFolder) {
         const filePaths = await listFolderFiles(importFolder);
         if (filePaths.length > 0) {
@@ -251,10 +268,7 @@ function App() {
 
   // Settings view
   if (showSettings) {
-    return <Settings onBack={() => setShowSettings(false)} onOpenFilamentManager={() => {
-      setShowSettings(false);
-      setShowFilamentManager(true);
-    }} onLibraryChanged={() => {
+    return <Settings onBack={() => setShowSettings(false)} onLibraryChanged={() => {
       // Reset all filters and navigation state when library changes
       setSearch("");
       setSelectedTags([]);
@@ -281,8 +295,18 @@ function App() {
         onBack={handleBack}
         onDeleted={handleBack}
         onDuplicated={(newId) => navigateTo(newId)}
-        onFilterByFilaments={(keys) => {
-          setSelectedFilaments(keys);
+        onFilterByFilaments={(ids) => {
+          setSearch("");
+          setSelectedTags([]);
+          setExcludedTags([]);
+          setSelectedCollection(undefined);
+          setExcludedFilaments([]);
+          setSelectedSize(undefined);
+          setExcludedSizes([]);
+          _setNoFilamentFilter(undefined);
+          setOwnedOnly(false);
+          setAllOwned(false);
+          setSelectedFilaments(ids);
           navigateTo(null);
         }}
       />
@@ -305,6 +329,10 @@ function App() {
         onExcludedFilamentsChange={setExcludedFilaments}
         noFilamentFilter={noFilamentFilter}
         onNoFilamentFilterChange={setNoFilamentFilter}
+        ownedOnly={ownedOnly}
+        onOwnedOnlyChange={setOwnedOnly}
+        allOwned={allOwned}
+        onAllOwnedChange={setAllOwned}
         selectedSize={selectedSize}
         onSizeChange={setSelectedSize}
         excludedSizes={excludedSizes}
@@ -319,6 +347,8 @@ function App() {
           setSelectedFilaments([]);
           setExcludedFilaments([]);
           setNoFilamentFilter(undefined);
+          setOwnedOnly(false);
+          setAllOwned(false);
           setSelectedSize(undefined);
           setExcludedSizes([]);
         }}
@@ -337,6 +367,7 @@ function App() {
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           onCreateProject={() => setShowCreate(true)}
+          onOpenFilamentManager={() => setShowFilamentManager(true)}
           onOpenSettings={() => setShowSettings(true)}
         />
 

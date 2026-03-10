@@ -6,8 +6,9 @@ import type {
   TagWithCount,
   Collection,
   ProjectFile,
-  FilamentInfo,
-  FilamentSubstitution,
+  CuratedFilament,
+  CuratedFilamentWithCount,
+  ProjectFilamentDisplay,
   ListProjectsRequest,
 } from "./types";
 
@@ -21,7 +22,7 @@ export async function getProject(id: string): Promise<Project> {
   return invoke("get_project", { id });
 }
 
-export async function updateProject(id: string, updates: { name?: string; description?: string }): Promise<void> {
+export async function updateProject(id: string, updates: { name?: string; description?: string; print_width_mm?: number | null; print_height_mm?: number | null; print_time_mins?: number | null }): Promise<void> {
   return invoke("update_project", { id, req: updates });
 }
 
@@ -63,26 +64,94 @@ export async function setProjectTags(projectId: string, tagIds: string[]): Promi
   return invoke("set_project_tags", { projectId, tagIds });
 }
 
-// ── Filament & Size Filters ──
+// ── Curated Filaments ──
 
-export async function listAllFilaments(): Promise<FilamentInfo[]> {
-  return invoke("list_all_filaments");
+export async function listCuratedFilaments(): Promise<CuratedFilament[]> {
+  return invoke("list_curated_filaments");
 }
+
+export async function listUsedCuratedFilaments(): Promise<CuratedFilamentWithCount[]> {
+  return invoke("list_used_curated_filaments");
+}
+
+export async function createCuratedFilament(req: {
+  brand: string;
+  line?: string;
+  material?: string;
+  name: string;
+  color?: string;
+  transmission_distance?: number;
+  owned?: boolean;
+}): Promise<CuratedFilament> {
+  return invoke("create_curated_filament", { req });
+}
+
+export async function updateCuratedFilament(id: string, req: {
+  brand?: string;
+  line?: string;
+  material?: string;
+  name?: string;
+  color?: string;
+  transmission_distance?: number;
+  owned?: boolean;
+}): Promise<void> {
+  return invoke("update_curated_filament", { id, req });
+}
+
+export async function deleteCuratedFilament(id: string): Promise<void> {
+  return invoke("delete_curated_filament", { id });
+}
+
+export async function importCuratedFilaments(filePath: string): Promise<number> {
+  return invoke("import_curated_filaments", { filePath });
+}
+
+// ── Project Filaments ──
+
+export async function getProjectFilamentsV2(projectId: string): Promise<ProjectFilamentDisplay[]> {
+  return invoke("get_project_filaments_v2", { projectId });
+}
+
+export async function matchProjectFilament(projectFilamentId: string, curatedFilamentId: string): Promise<void> {
+  return invoke("match_project_filament", { req: { project_filament_id: projectFilamentId, curated_filament_id: curatedFilamentId } });
+}
+
+export async function unmatchProjectFilament(projectFilamentId: string): Promise<void> {
+  return invoke("unmatch_project_filament", { projectFilamentId });
+}
+
+export async function rematchAllProjectFilaments(projectId: string): Promise<void> {
+  return invoke("rematch_all_project_filaments", { projectId });
+}
+
+export async function rematchUnmatchedFilaments(): Promise<number> {
+  return invoke("rematch_unmatched_filaments");
+}
+
+export async function clearAllCuratedFilaments(): Promise<void> {
+  return invoke("clear_all_curated_filaments");
+}
+
+export async function addManualProjectFilament(projectId: string, curatedFilamentId: string): Promise<void> {
+  return invoke("add_manual_project_filament", { projectId, curatedFilamentId });
+}
+
+export async function removeProjectFilament(projectFilamentId: string): Promise<void> {
+  return invoke("remove_project_filament", { projectFilamentId });
+}
+
+export async function resetProjectFilament(projectFilamentId: string): Promise<void> {
+  return invoke("reset_project_filament", { projectFilamentId });
+}
+
+export async function reparseAllProjectFilaments(): Promise<number> {
+  return invoke("reparse_all_project_filaments");
+}
+
+// ── Size Filters ──
 
 export async function listAllSizes(): Promise<string[]> {
   return invoke("list_all_sizes");
-}
-
-export async function listAllFilamentsRaw(): Promise<FilamentInfo[]> {
-  return invoke("list_all_filaments_raw");
-}
-
-export async function getFilamentSubstitutions(): Promise<FilamentSubstitution[]> {
-  return invoke("get_filament_substitutions");
-}
-
-export async function setFilamentSubstitution(fromKey: string, toKey: string | null): Promise<void> {
-  return invoke("set_filament_substitution", { fromKey, toKey });
 }
 
 // ── Collections ──

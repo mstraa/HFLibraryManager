@@ -1,4 +1,4 @@
-# 3D Print Manager — Project Plan
+# HF Library Manager — Project Plan
 
 ## Tech Stack: Tauri v2 + React + TypeScript
 
@@ -41,7 +41,7 @@ Tag
 **Storage:** SQLite (via `rusqlite`) for metadata, managed folder for files:
 
 ```
-~/3dPrintManager/
+~/HFLibraryManager/
 ├── db.sqlite
 ├── projects/
 │   └── {project-id}/

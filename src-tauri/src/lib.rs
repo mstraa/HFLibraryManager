@@ -13,7 +13,8 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init());
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build());
 
     #[cfg(debug_assertions)]
     {
@@ -40,9 +41,23 @@ pub fn run() {
             // Filament & Size filters
             commands::list_all_filaments,
             commands::list_all_sizes,
-            commands::list_all_filaments_raw,
-            commands::get_filament_substitutions,
-            commands::set_filament_substitution,
+            // Curated filaments
+            commands::list_curated_filaments,
+            commands::list_used_curated_filaments,
+            commands::create_curated_filament,
+            commands::update_curated_filament,
+            commands::delete_curated_filament,
+            commands::import_curated_filaments,
+            commands::get_project_filaments_v2,
+            commands::match_project_filament,
+            commands::unmatch_project_filament,
+            commands::rematch_all_project_filaments,
+            commands::rematch_unmatched_filaments,
+            commands::clear_all_curated_filaments,
+            commands::reparse_all_project_filaments,
+            commands::add_manual_project_filament,
+            commands::remove_project_filament,
+            commands::reset_project_filament,
             // Collections
             commands::create_collection,
             commands::list_collections,
