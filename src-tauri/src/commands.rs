@@ -461,6 +461,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
             file_count: row.get(5)?,
             filaments: vec![],
             size: None,
+            starred_3mf_path: None,
         })
     }).map_err(map_err)?;
 
@@ -574,6 +575,26 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
         for p in &mut projects {
             p.size = sizes_by_project.remove(&p.id);
+        }
+    }
+
+    // Batch-fetch starred 3MF file paths
+    {
+        let mut stmt_3mf = conn.prepare(
+            "SELECT project_id, file_path FROM files
+             WHERE favorited = 1 AND LOWER(original_filename) LIKE '%.3mf'"
+        ).map_err(map_err)?;
+        let rows_3mf = stmt_3mf.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(map_err)?;
+        let mut threemf_by_project: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for row in rows_3mf {
+            if let Ok((pid, path)) = row {
+                threemf_by_project.entry(pid).or_insert(path);
+            }
+        }
+        for p in &mut projects {
+            p.starred_3mf_path = threemf_by_project.remove(&p.id);
         }
     }
 

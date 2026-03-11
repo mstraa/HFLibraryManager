@@ -38,6 +38,7 @@ pub struct ProjectSummary {
     pub file_count: i64,
     pub filaments: Vec<ProjectFilamentDisplay>,
     pub size: Option<String>,
+    pub starred_3mf_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

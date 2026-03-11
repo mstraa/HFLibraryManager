@@ -8,6 +8,7 @@ interface ProjectGridProps {
   onToggleSelect: (id: string) => void;
   onFilamentClick?: (hexColor: string) => void;
   onSizeClick?: (size: string) => void;
+  onPrintClick?: (path: string) => void;
 }
 
 export default function ProjectGrid({
@@ -17,6 +18,7 @@ export default function ProjectGrid({
   onToggleSelect,
   onFilamentClick,
   onSizeClick,
+  onPrintClick,
 }: ProjectGridProps) {
   const selectionMode = selectedIds.length > 0;
 
@@ -59,6 +61,7 @@ export default function ProjectGrid({
             onToggleSelect={onToggleSelect}
             onFilamentClick={onFilamentClick}
             onSizeClick={onSizeClick}
+            onPrintClick={onPrintClick}
           />
         ))}
       </div>

@@ -15,6 +15,7 @@ interface ProjectCardProps {
   onToggleSelect?: (id: string) => void;
   onFilamentClick?: (hexColor: string) => void;
   onSizeClick?: (size: string) => void;
+  onPrintClick?: (path: string) => void;
 }
 
 function ProjectCard({
@@ -25,6 +26,7 @@ function ProjectCard({
   onToggleSelect,
   onFilamentClick,
   onSizeClick,
+  onPrintClick,
 }: ProjectCardProps) {
   const [thumbnailMode] = useThumbnailMode();
 
@@ -73,6 +75,22 @@ function ProjectCard({
               />
             </svg>
           </div>
+        )}
+
+        {/* Print icon overlay */}
+        {project.starred_3mf_path && onPrintClick && !selectionMode && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrintClick(project.starred_3mf_path!);
+            }}
+            className="absolute top-2 right-2 w-7 h-7 rounded-lg bg-black/50 hover:bg-indigo-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+            title="Open in Bambu Studio"
+          >
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+          </button>
         )}
 
         {/* Selection checkbox overlay */}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch, importProject } from "./lib/api";
+import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch, importProject, openFileWithApp } from "./lib/api";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
@@ -295,6 +295,10 @@ function App() {
     setSelectedSize(size);
   }, []);
 
+  const handlePrintClick = useCallback((path: string) => {
+    openFileWithApp(path, "BambuStudio").catch((e) => console.error("Failed to open Bambu Studio:", e));
+  }, []);
+
   // First launch — show welcome screen
   if (showWelcome === null) {
     return <div className="h-screen bg-gray-900" />; // loading
@@ -435,6 +439,7 @@ function App() {
             onToggleSelect={handleToggleSelect}
             onFilamentClick={handleFilamentClick}
             onSizeClick={handleSizeClick}
+            onPrintClick={handlePrintClick}
           />
         ) : (
           <ProjectTable
@@ -444,6 +449,7 @@ function App() {
             onToggleSelect={handleToggleSelect}
             onFilamentClick={handleFilamentClick}
             onSizeClick={handleSizeClick}
+            onPrintClick={handlePrintClick}
           />
         )}
 

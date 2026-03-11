@@ -22,6 +22,7 @@ export interface ProjectSummary {
   file_count: number;
   filaments: ProjectFilamentDisplay[];
   size: string | null;
+  starred_3mf_path: string | null;
 }
 
 export interface Tag {

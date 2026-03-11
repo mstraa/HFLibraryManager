@@ -1195,20 +1195,28 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
         onCancel={() => setShowDeleteConfirm(false)}
       />
 
-      {/* Thumbnail preview modal */}
-      {thumbnailPreview && project.thumbnail_path && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 cursor-pointer"
-          onClick={() => setThumbnailPreview(false)}
-        >
-          <img
-            src={convertFileSrc(project.thumbnail_path) + "?v=" + thumbKey}
-            alt={project.name}
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+      {/* Thumbnail preview modal — show original image, not the resized thumbnail */}
+      {thumbnailPreview && project.thumbnail_path && (() => {
+        const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "svg"]);
+        const starredImages = files
+          .filter(f => f.favorited && IMAGE_EXTS.has(f.original_filename.split(".").pop()?.toLowerCase() ?? ""));
+        const originalSrc = starredImages.length > 0
+          ? convertFileSrc(starredImages[0].file_path)
+          : convertFileSrc(project.thumbnail_path) + "?v=" + thumbKey;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 cursor-pointer"
+            onClick={() => setThumbnailPreview(false)}
+          >
+            <img
+              src={originalSrc}
+              alt={project.name}
+              className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        );
+      })()}
 
       {/* Toast notification */}
       {toast && (
