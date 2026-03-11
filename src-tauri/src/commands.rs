@@ -1785,6 +1785,14 @@ pub fn import_curated_filaments(db: State<Database>, file_path: String) -> CmdRe
         if let Ok(n) = result {
             count += n as i32;
         }
+        // If the entry already existed and the import says owned, update owned flag
+        if owned {
+            let _ = conn.execute(
+                "UPDATE shared.curated_filaments SET owned = 1, updated_at = ?1
+                 WHERE LOWER(brand) = LOWER(?2) AND LOWER(line) = LOWER(?3) AND LOWER(name) = LOWER(?4)",
+                rusqlite::params![now, brand, line, name],
+            );
+        }
     }
 
     Ok(count)
@@ -1860,6 +1868,21 @@ pub fn clear_all_curated_filaments(db: State<Database>) -> CmdResult<()> {
         [],
     ).map_err(map_err)?;
     conn.execute("DELETE FROM shared.curated_filaments", []).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reset_curated_filaments(db: State<Database>) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+    // Clear matches and delete all curated filaments
+    conn.execute(
+        "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched'",
+        [],
+    ).map_err(map_err)?;
+    conn.execute("DELETE FROM shared.curated_filaments", []).map_err(map_err)?;
+    // Re-seed with defaults
+    Database::seed_default_filaments(conn);
     Ok(())
 }
 
@@ -2325,3 +2348,27 @@ fn get_project_collections(conn: &Connection, project_id: &str) -> Result<Vec<Co
 }
 
 use rusqlite::Connection;
+
+#[tauri::command]
+pub fn reset_to_default(db: State<Database>) -> CmdResult<()> {
+    // Drop the database connection so files are unlocked
+    db.close();
+
+    // Delete config file (triggers first-launch welcome screen)
+    let config_dir = config::config_dir_path();
+    let config_file = config_dir.join("config.json");
+    if config_file.exists() {
+        fs::remove_file(&config_file).map_err(map_err)?;
+    }
+
+    // Delete shared filaments database
+    let filaments_db = config_dir.join("filaments.sqlite");
+    if filaments_db.exists() {
+        let _ = fs::remove_file(&filaments_db);
+    }
+    // WAL/SHM files
+    let _ = fs::remove_file(config_dir.join("filaments.sqlite-wal"));
+    let _ = fs::remove_file(config_dir.join("filaments.sqlite-shm"));
+
+    Ok(())
+}

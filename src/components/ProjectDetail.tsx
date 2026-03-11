@@ -27,7 +27,8 @@ import {
   resetProjectFilament,
 } from "../lib/api";
 import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, ProjectFilamentDisplay, CuratedFilament } from "../lib/types";
-import MarkdownEditor from "./MarkdownEditor";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
 import { onDragMouseDown } from "../hooks/useDrag";
@@ -58,8 +59,9 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const [editHeight, setEditHeight] = useState("");
   const [editTimeH, setEditTimeH] = useState("");
   const [editTimeM, setEditTimeM] = useState("");
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [imagesOpen, setImagesOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(() => localStorage.getItem("notes-collapsed") !== "true");
+  const [editingNotes, setEditingNotes] = useState(false);
+
   const [settingThumbnail, setSettingThumbnail] = useState(false);
   const [thumbKey, setThumbKey] = useState(0);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
@@ -778,6 +780,25 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                               {pf.is_manual ? "manual" : pf.match_status}
                             </span>
 
+                            {/* Quick confirm button for guessed filaments */}
+                            {pf.match_status === "guessed" && pf.curated_filament_id ? (
+                              <button
+                                onClick={async () => {
+                                  await matchProjectFilament(pf.project_filament_id, pf.curated_filament_id!);
+                                  const updated = await getProjectFilamentsV2(projectId);
+                                  setProjectFilaments(updated);
+                                }}
+                                className="text-[10px] w-5 h-5 flex items-center justify-center rounded border border-green-300 dark:border-green-600 text-green-500 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 cursor-pointer transition-colors shrink-0"
+                                title="Confirm match"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </button>
+                            ) : (
+                              <div className="w-5 shrink-0" />
+                            )}
+
                             {/* Reset button (non-manual parsed filaments only) */}
                             {!pf.is_manual && pf.match_status !== "unmatched" ? (
                               <button
@@ -1034,100 +1055,65 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                   );
                 })()}
               </div>
-            </div>
 
-          {/* Notes */}
-          <div>
-            <button
-              onClick={() => setNotesOpen(!notesOpen)}
-              className="flex items-center gap-1.5 cursor-pointer group"
-            >
-              <svg
-                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${notesOpen ? "rotate-90" : ""}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
-                Notes
-              </h3>
-              {!notesOpen && project.description && (
-                <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[200px]">
-                  — {project.description.split("\n")[0]}
-                </span>
-              )}
-            </button>
-            {notesOpen && (
-              <div className="mt-2">
-                <MarkdownEditor
-                  value={project.description}
-                  onChange={handleDescriptionChange}
-                  onBlur={handleDescriptionBlur}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Images preview */}
-          {(() => {
-            const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg"]);
-            const imageFiles = files.filter(f => {
-              const ext = f.original_filename.split(".").pop()?.toLowerCase() ?? "";
-              return IMAGE_EXTS.has(ext);
-            });
-            if (imageFiles.length === 0) return null;
-            return (
-              <div>
+            {/* Notes */}
+            <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
+              <div className="flex items-center gap-2 mb-1">
                 <button
-                  onClick={() => setImagesOpen(!imagesOpen)}
+                  onClick={() => {
+                    const next = !notesOpen;
+                    setNotesOpen(next);
+                    localStorage.setItem("notes-collapsed", next ? "false" : "true");
+                  }}
                   className="flex items-center gap-1.5 cursor-pointer group"
                 >
                   <svg
-                    className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${imagesOpen ? "rotate-90" : ""}`}
+                    className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${notesOpen ? "rotate-90" : ""}`}
                     fill="none" stroke="currentColor" viewBox="0 0 24 24"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                   <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
-                    Images ({imageFiles.length})
+                    Notes
                   </h3>
                 </button>
-                {imagesOpen && (
-                  <div className="mt-3 flex flex-wrap gap-3">
-                    {imageFiles.map((f) => (
-                      <div
-                        key={f.id}
-                        onClick={() => {
-                          setPreviewFileId(f.id);
-                          filesSectionRef.current?.scrollIntoView({ behavior: "smooth" });
-                        }}
-                        className="rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
-                        style={{ maxWidth: "250px" }}
-                      >
-                        <img
-                          src={convertFileSrc(f.file_path)}
-                          alt={f.original_filename}
-                          className="max-h-48 w-auto mx-auto block"
-                          loading="lazy"
-                        />
-                        <div className="px-2 py-1.5">
-                          <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate" title={f.original_filename}>
-                            {f.original_filename}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                {notesOpen && (
+                  <button
+                    onClick={() => setEditingNotes(!editingNotes)}
+                    className={`p-1 rounded transition-colors cursor-pointer ${
+                      editingNotes
+                        ? "text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30"
+                        : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                    }`}
+                    title={editingNotes ? "Done editing" : "Edit notes"}
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </button>
                 )}
               </div>
-            );
-          })()}
+              {notesOpen && (
+                editingNotes ? (
+                  <textarea
+                    value={project.description}
+                    onChange={(e) => handleDescriptionChange(e.target.value)}
+                    onBlur={handleDescriptionBlur}
+                    placeholder="Write notes in Markdown..."
+                    className="w-full min-h-[120px] p-3 text-xs bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-600 rounded-lg resize-y focus:outline-none focus:ring-1 focus:ring-indigo-400 font-mono"
+                    autoFocus
+                  />
+                ) : project.description ? (
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-xs [&_h3]:font-bold [&_p]:text-xs [&_li]:text-xs [&_ul]:my-1 [&_ol]:my-1 [&_p]:my-1 [&_h1]:my-1 [&_h2]:my-1 [&_h3]:my-1">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{project.description}</ReactMarkdown>
+                  </div>
+                ) : null
+              )}
+            </div>
+          </div>
 
           {/* Files */}
           <div ref={filesSectionRef}>
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-              Files
-            </h3>
             <FileList
               files={files}
               projectId={projectId}

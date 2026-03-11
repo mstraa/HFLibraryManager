@@ -1,11 +1,14 @@
 use crate::config;
 use crate::models::FilamentInfo;
+use chrono::Utc;
 use rusqlite::{Connection, Result};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
+
+const DEFAULT_FILAMENTS_JSON: &str = include_str!("../resources/default_filaments.json");
 
 pub struct Database {
     conn: Mutex<Option<Connection>>,
@@ -43,6 +46,7 @@ impl Database {
         ).expect("Failed to attach shared filaments database");
         conn.execute_batch("PRAGMA shared.journal_mode=WAL;").expect("shared WAL mode");
         Self::run_shared_migrations(&conn).expect("shared migrations");
+        Self::seed_default_filaments(&conn);
 
         Self::run_migrations_on(&conn).expect("migrations");
         conn
@@ -75,6 +79,73 @@ impl Database {
             "
         )?;
         Ok(())
+    }
+
+    /// Seed the shared filaments database with defaults if empty
+    pub(crate) fn seed_default_filaments(conn: &Connection) {
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM shared.curated_filaments", [], |r| r.get(0))
+            .unwrap_or(0);
+        if count > 0 {
+            return;
+        }
+
+        let json: serde_json::Value = match serde_json::from_str(DEFAULT_FILAMENTS_JSON) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to parse default filaments JSON: {}", e);
+                return;
+            }
+        };
+
+        let arr = match json.as_array()
+            .or_else(|| json.get("Filaments").and_then(|v| v.as_array()))
+        {
+            Some(a) => a,
+            None => {
+                eprintln!("Default filaments JSON has unexpected format");
+                return;
+            }
+        };
+
+        let now = Utc::now().to_rfc3339();
+        let mut count = 0;
+        for item in arr {
+            let material = item.get("Type").and_then(|v| v.as_str())
+                .or_else(|| item.get("Material").and_then(|v| v.as_str()))
+                .unwrap_or("PLA");
+            if material.eq_ignore_ascii_case("IMAGE") { continue; }
+
+            let brand_raw = item.get("Brand").and_then(|v| v.as_str()).unwrap_or("");
+            let name = item.get("Name").and_then(|v| v.as_str()).unwrap_or("");
+            let color = item.get("Color").and_then(|v| v.as_str()).unwrap_or("");
+            let td = item.get("Transmissivity").and_then(|v| v.as_f64())
+                .or_else(|| item.get("TD").and_then(|v| v.as_f64()))
+                .or_else(|| item.get("Transmission Distance").and_then(|v| v.as_f64()));
+            let uuid_str = item.get("uuid").and_then(|v| v.as_str())
+                .or_else(|| item.get("UUID").and_then(|v| v.as_str()));
+
+            if name.is_empty() { continue; }
+
+            let owned = item.get("Owned").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (brand, line) = Self::split_brand_line(brand_raw);
+            let id = Uuid::new_v4().to_string();
+
+            if conn.execute(
+                "INSERT OR IGNORE INTO shared.curated_filaments (id, brand, line, material, name, color, transmission_distance, owned, source_uuid, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![id, brand, line, material, name, color, td, owned, uuid_str, now, now],
+            ).is_ok() {
+                count += 1;
+            }
+        }
+        eprintln!("Seeded {} default filaments", count);
+    }
+
+    /// Close the database connection, releasing file locks.
+    pub fn close(&self) {
+        let mut guard = self.conn.lock().expect("Failed to lock database");
+        *guard = None;
     }
 
     /// Close the current connection and open a new one for the active library.

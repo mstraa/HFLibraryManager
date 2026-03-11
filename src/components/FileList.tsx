@@ -158,7 +158,7 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
   const [previewFile, setPreviewFileState] = useState<ProjectFile | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(GROUP_ORDER));
   const [contextMenu, setContextMenu] = useState<{ file: ProjectFile; top: number; left: number } | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [notesInput, setNotesInput] = useState("");
@@ -304,7 +304,7 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
   // ── Render ──
 
   return (
-    <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" style={{ minHeight: "300px" }}>
+    <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       {/* File list side */}
       <div className={`flex flex-col ${previewFile ? "w-1/2" : "w-full"} transition-all`}>
         {/* Header */}
@@ -425,7 +425,7 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
         )}
 
         {/* File groups (scrollable) */}
-        <div className="flex-1 overflow-y-auto" ref={scrollRef}>
+        <div className="overflow-y-auto max-h-[60vh]" ref={scrollRef}>
           {files.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
               No files yet. Import or drop files into the project folder and hit Refresh.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { formatBytes } from "../lib/formatting";
-import { getLibraries, addLibrary, removeLibrary, switchLibrary, renameLibrary, getStorageSizes, emptyTrash, clearAllCuratedFilaments, reparseAllProjectFilaments, rematchUnmatchedFilaments } from "../lib/api";
+import { getLibraries, addLibrary, removeLibrary, switchLibrary, renameLibrary, getStorageSizes, emptyTrash, clearAllCuratedFilaments, reparseAllProjectFilaments, rematchUnmatchedFilaments, resetToDefault, resetCuratedFilaments } from "../lib/api";
 import { onDragMouseDown } from "../hooks/useDrag";
 import { useTheme, type Theme } from "../hooks/useTheme";
 import { useThumbnailMode } from "../hooks/useThumbnailMode";
@@ -33,6 +33,10 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
   const [reparseResult, setReparseResult] = useState<number | null>(null);
   const [rematchingFilaments, setRematchingFilaments] = useState(false);
   const [rematchResult, setRematchResult] = useState<number | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [showResetFilamentsConfirm, setShowResetFilamentsConfirm] = useState(false);
+  const [resettingFilaments, setResettingFilaments] = useState(false);
   const { theme, setTheme } = useTheme();
   const [thumbnailMode, setThumbnailMode] = useThumbnailMode();
 
@@ -401,13 +405,22 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
                   {reparsingFilaments ? "Reparsing..." : "Reparse All"}
                 </button>
                 <button
+                  onClick={() => setShowResetFilamentsConfirm(true)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 cursor-pointer transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Reset to Default
+                </button>
+                <button
                   onClick={() => setShowClearFilamentsConfirm(true)}
                   className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
-                  Clear Curated
+                  Clear All
                 </button>
               </div>
               {rematchResult !== null && (
@@ -421,6 +434,23 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Reset */}
+          <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h2 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">Danger Zone</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Reset the app to its initial state. This removes all configuration and the filament library. Your project files on disk are not deleted.
+            </p>
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Reset to Default
+            </button>
           </div>
         </div>
       </div>
@@ -485,6 +515,85 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
                 className="px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 cursor-pointer disabled:opacity-50"
               >
                 {clearingFilaments ? "Clearing..." : "Clear All"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset filament library confirm dialog */}
+      {showResetFilamentsConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 max-w-md mx-4 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Reset Filament Library
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              This will delete all curated filaments, unlink them from projects, and restore the built-in default library. Any filaments you added or imported will be lost.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowResetFilamentsConfirm(false)}
+                disabled={resettingFilaments}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setResettingFilaments(true);
+                  try {
+                    await resetCuratedFilaments();
+                    setShowResetFilamentsConfirm(false);
+                  } finally {
+                    setResettingFilaments(false);
+                  }
+                }}
+                disabled={resettingFilaments}
+                className="px-4 py-2 text-sm rounded-lg bg-amber-500 text-white hover:bg-amber-600 cursor-pointer disabled:opacity-50"
+              >
+                {resettingFilaments ? "Resetting..." : "Reset Library"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset to default confirm dialog */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 max-w-md mx-4 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Reset to Default
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              This will remove all app configuration and the curated filament library, then restart the app to the welcome screen. Your project files on disk will not be deleted.
+            </p>
+            <p className="text-sm font-medium text-red-600 dark:text-red-400">
+              This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                disabled={resetting}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setResetting(true);
+                  try {
+                    await resetToDefault();
+                  } catch {
+                    setResetting(false);
+                    setShowResetConfirm(false);
+                  }
+                }}
+                disabled={resetting}
+                className="px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 cursor-pointer disabled:opacity-50"
+              >
+                {resetting ? "Resetting..." : "Reset & Restart"}
               </button>
             </div>
           </div>

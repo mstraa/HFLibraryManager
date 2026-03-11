@@ -155,12 +155,15 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
           {uniqueMaterials.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
         <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={filterOwned}
-            onChange={(e) => setFilterOwned(e.target.checked)}
-            className="rounded"
-          />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={filterOwned}
+            onClick={() => setFilterOwned(!filterOwned)}
+            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${filterOwned ? "bg-indigo-500" : "bg-gray-300 dark:bg-gray-600"}`}
+          >
+            <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform ${filterOwned ? "translate-x-3.5" : "translate-x-0.5"}`} />
+          </button>
           Owned only
         </label>
         <span className="text-xs text-gray-400 dark:text-gray-500">{filtered.length} shown</span>
@@ -220,12 +223,15 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
                   <td className="px-3 py-2 text-gray-700 dark:text-gray-300 font-medium">{f.name}</td>
                   <td className="px-3 py-2 text-gray-500 dark:text-gray-400 font-mono text-xs">{f.transmission_distance ?? "—"}</td>
                   <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      checked={f.owned}
-                      onChange={() => handleToggleOwned(f.id, f.owned)}
-                      className="rounded cursor-pointer"
-                    />
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={f.owned}
+                      onClick={() => handleToggleOwned(f.id, f.owned)}
+                      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${f.owned ? "bg-indigo-500" : "bg-gray-300 dark:bg-gray-600"}`}
+                    >
+                      <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform ${f.owned ? "translate-x-3.5" : "translate-x-0.5"}`} />
+                    </button>
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
@@ -293,8 +299,16 @@ function AddFilamentForm({ onAdd, onCancel }: {
       <input value={name} onChange={e => setName(e.target.value)} placeholder="Name *" className="w-28 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
       <input value={color} onChange={e => setColor(e.target.value)} placeholder="#hex" className="w-20 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" />
       <input value={td} onChange={e => setTd(e.target.value)} placeholder="TD" className="w-14 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" />
-      <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
-        <input type="checkbox" checked={owned} onChange={e => setOwned(e.target.checked)} className="rounded" />
+      <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={owned}
+          onClick={() => setOwned(!owned)}
+          className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${owned ? "bg-indigo-500" : "bg-gray-300 dark:bg-gray-600"}`}
+        >
+          <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform ${owned ? "translate-x-3.5" : "translate-x-0.5"}`} />
+        </button>
         Own
       </label>
       <button
@@ -333,7 +347,15 @@ function EditFilamentRow({ filament, onSave, onCancel }: {
       <td className="px-3 py-2"><input value={name} onChange={e => setName(e.target.value)} className="w-full px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" /></td>
       <td className="px-3 py-2"><input value={td} onChange={e => setTd(e.target.value)} className="w-14 px-1 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono" /></td>
       <td className="px-3 py-2 text-center">
-        <input type="checkbox" checked={owned} onChange={e => setOwned(e.target.checked)} className="rounded cursor-pointer" />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={owned}
+          onClick={() => setOwned(!owned)}
+          className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${owned ? "bg-indigo-500" : "bg-gray-300 dark:bg-gray-600"}`}
+        >
+          <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform ${owned ? "translate-x-3.5" : "translate-x-0.5"}`} />
+        </button>
       </td>
       <td className="px-3 py-2">
         <div className="flex gap-1">

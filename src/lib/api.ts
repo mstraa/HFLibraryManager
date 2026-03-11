@@ -281,3 +281,12 @@ export async function getStorageSizes(): Promise<{ projects_size: number; delete
 export async function emptyTrash(): Promise<void> {
   return invoke("empty_trash");
 }
+
+export async function resetToDefault(): Promise<void> {
+  await invoke("reset_to_default");
+  window.location.reload();
+}
+
+export async function resetCuratedFilaments(): Promise<void> {
+  return invoke("reset_curated_filaments");
+}

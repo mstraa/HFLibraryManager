@@ -14,7 +14,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build());
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
 
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
@@ -52,6 +53,7 @@ pub fn run() {
             commands::rematch_all_project_filaments,
             commands::rematch_unmatched_filaments,
             commands::clear_all_curated_filaments,
+            commands::reset_curated_filaments,
             commands::reparse_all_project_filaments,
             commands::add_manual_project_filament,
             commands::remove_project_filament,
@@ -88,6 +90,7 @@ pub fn run() {
             commands::rename_library,
             commands::get_storage_sizes,
             commands::empty_trash,
+            commands::reset_to_default,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

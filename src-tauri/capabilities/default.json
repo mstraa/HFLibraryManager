@@ -11,6 +11,7 @@
     "dialog:default",
     "fs:default",
     "fs:allow-read-text-file",
-    "mcp-bridge:default"
+    "mcp-bridge:default",
+    "process:default"
   ]
 }
