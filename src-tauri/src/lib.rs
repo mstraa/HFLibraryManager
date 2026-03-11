@@ -78,6 +78,8 @@ pub fn run() {
             commands::read_text_file,
             commands::sync_project_files,
             commands::export_data,
+            commands::export_project,
+            commands::import_project,
             commands::get_data_dir,
             commands::is_first_launch,
             commands::setup_library,

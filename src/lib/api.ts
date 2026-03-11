@@ -232,6 +232,14 @@ export async function exportData(): Promise<string> {
   return invoke("export_data");
 }
 
+export async function exportProject(projectId: string, destPath: string): Promise<void> {
+  return invoke("export_project", { projectId, destPath });
+}
+
+export async function importProject(filePath: string): Promise<Project> {
+  return invoke("import_project", { filePath });
+}
+
 export async function getDataDir(): Promise<string> {
   return invoke("get_data_dir");
 }

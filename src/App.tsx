@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch } from "./lib/api";
+import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch, importProject } from "./lib/api";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
 import SearchBar from "./components/SearchBar";
@@ -151,6 +152,29 @@ function App() {
     }
   }
 
+  async function handleImportProject(filePath?: string) {
+    let path = filePath;
+    if (!path) {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "HF Library Project", extensions: ["hllmproject"] }],
+      });
+      if (!selected) return;
+      path = typeof selected === "string" ? selected : (selected as { path: string }).path;
+      if (!path) return;
+    }
+    setImporting(true);
+    try {
+      const project = await importProject(path);
+      navigateTo(project.id);
+      setSidebarRefreshKey((k) => k + 1);
+    } catch (e) {
+      console.error("Import failed:", e);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function navigateTo(projectId: string | null) {
     // Push current state onto history before navigating
     navHistoryRef.current.push(activeProjectId ?? "__library__");
@@ -237,12 +261,16 @@ function App() {
   useKeyboard(keyBindings);
   useSwipeNavigation(navigateBack, navigateForward);
 
-  // Handle folder drop to create project(s)
+  // Handle folder drop to create project(s) or import .hllmproject files
   const handleFolderDrop = useCallback(async (paths: string[]) => {
     if (activeProjectId) return; // Only on library view
-    for (const folderPath of paths) {
-      const folderName = folderPath.split(/[/\\]/).pop() || "Untitled";
-      await handleCreate(folderName, "", folderPath, false);
+    for (const droppedPath of paths) {
+      if (droppedPath.toLowerCase().endsWith(".hllmproject")) {
+        await handleImportProject(droppedPath);
+      } else {
+        const folderName = droppedPath.split(/[/\\]/).pop() || "Untitled";
+        await handleCreate(folderName, "", droppedPath, false);
+      }
     }
   }, [activeProjectId]);
 
@@ -417,8 +445,8 @@ function App() {
               <svg className="w-12 h-12 mx-auto text-indigo-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
               </svg>
-              <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">Drop folder to create project</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Files will be imported automatically</p>
+              <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">Drop to import</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Drop a folder or .hllmproject file</p>
             </div>
           </div>
         )}
@@ -442,6 +470,7 @@ function App() {
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreate={handleCreate}
+        onImportProject={() => handleImportProject()}
         loading={importing}
       />
     </div>

@@ -2096,6 +2096,408 @@ pub fn export_data(db: State<Database>) -> CmdResult<String> {
     serde_json::to_string_pretty(&export).map_err(map_err)
 }
 
+// ── Project Export/Import ──
+
+#[tauri::command]
+pub fn export_project(db: State<Database>, project_id: String, dest_path: String) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+
+    // Get project
+    let (name, description, thumb_path, created_at, updated_at, pw, ph, pt): (String, String, Option<String>, String, String, Option<f64>, Option<f64>, Option<i64>) = conn.query_row(
+        "SELECT name, description, thumbnail_path, created_at, updated_at, print_width_mm, print_height_mm, print_time_mins FROM projects WHERE id = ?1",
+        rusqlite::params![project_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+    ).map_err(map_err)?;
+
+    // Get tags
+    let mut tag_stmt = conn.prepare(
+        "SELECT t.name, t.color FROM tags t JOIN project_tags pt ON t.id = pt.tag_id WHERE pt.project_id = ?1"
+    ).map_err(map_err)?;
+    let tags: Vec<serde_json::Value> = tag_stmt.query_map(
+        rusqlite::params![project_id],
+        |row| Ok(serde_json::json!({ "name": row.get::<_, String>(0)?, "color": row.get::<_, String>(1)? })),
+    ).map_err(map_err)?.filter_map(|r| r.ok()).collect();
+
+    // Get collections
+    let mut coll_stmt = conn.prepare(
+        "SELECT c.name, c.description FROM collections c JOIN project_collections pc ON c.id = pc.collection_id WHERE pc.project_id = ?1"
+    ).map_err(map_err)?;
+    let collections: Vec<serde_json::Value> = coll_stmt.query_map(
+        rusqlite::params![project_id],
+        |row| Ok(serde_json::json!({ "name": row.get::<_, String>(0)?, "description": row.get::<_, String>(1)? })),
+    ).map_err(map_err)?.filter_map(|r| r.ok()).collect();
+
+    // Get files
+    let mut file_stmt = conn.prepare(
+        "SELECT id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at FROM files WHERE project_id = ?1"
+    ).map_err(map_err)?;
+    let files: Vec<(String, String, String, i64, String, Option<String>, bool, String, String, String)> = file_stmt.query_map(
+        rusqlite::params![project_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
+    ).map_err(map_err)?.filter_map(|r| r.ok()).collect();
+
+    // Get project filaments
+    let mut pf_stmt = conn.prepare(
+        "SELECT pf.parsed_color, pf.parsed_brand, pf.parsed_name, pf.parsed_td, pf.match_status, pf.is_manual,
+                cf.brand, cf.line, cf.material, cf.name, cf.color, cf.transmission_distance, cf.owned, cf.source_uuid
+         FROM project_filaments pf
+         LEFT JOIN shared.curated_filaments cf ON pf.curated_filament_id = cf.id
+         WHERE pf.project_id = ?1"
+    ).map_err(map_err)?;
+    let filaments: Vec<serde_json::Value> = pf_stmt.query_map(
+        rusqlite::params![project_id],
+        |row| {
+            let curated = if row.get::<_, Option<String>>(6)?.is_some() {
+                Some(serde_json::json!({
+                    "brand": row.get::<_, String>(6)?,
+                    "line": row.get::<_, String>(7)?,
+                    "material": row.get::<_, String>(8)?,
+                    "name": row.get::<_, String>(9)?,
+                    "color": row.get::<_, String>(10)?,
+                    "transmission_distance": row.get::<_, Option<f64>>(11)?,
+                    "owned": row.get::<_, bool>(12)?,
+                    "source_uuid": row.get::<_, Option<String>>(13)?,
+                }))
+            } else {
+                None
+            };
+            Ok(serde_json::json!({
+                "parsed_color": row.get::<_, String>(0)?,
+                "parsed_brand": row.get::<_, String>(1)?,
+                "parsed_name": row.get::<_, String>(2)?,
+                "parsed_td": row.get::<_, Option<f64>>(3)?,
+                "match_status": row.get::<_, String>(4)?,
+                "is_manual": row.get::<_, bool>(5)?,
+                "curated_filament": curated,
+            }))
+        },
+    ).map_err(map_err)?.filter_map(|r| r.ok()).collect();
+
+    // Build file manifest
+    let file_manifest: Vec<serde_json::Value> = files.iter().map(|(_, _, filename, file_size, notes, _, favorited, metadata, created_at, modified_at)| {
+        serde_json::json!({
+            "original_filename": filename,
+            "file_size": file_size,
+            "notes": notes,
+            "favorited": favorited,
+            "metadata": metadata,
+            "created_at": created_at,
+            "modified_at": modified_at,
+        })
+    }).collect();
+
+    let manifest = serde_json::json!({
+        "version": 1,
+        "exported_at": Utc::now().to_rfc3339(),
+        "project": {
+            "name": name,
+            "description": description,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "print_width_mm": pw,
+            "print_height_mm": ph,
+            "print_time_mins": pt,
+        },
+        "tags": tags,
+        "collections": collections,
+        "files": file_manifest,
+        "filaments": filaments,
+    });
+
+    // Create ZIP
+    let output_file = fs::File::create(&dest_path).map_err(map_err)?;
+    let mut zip = zip::ZipWriter::new(output_file);
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    // Write manifest
+    zip.start_file("manifest.json", options).map_err(map_err)?;
+    let manifest_bytes = serde_json::to_string_pretty(&manifest).map_err(map_err)?;
+    std::io::Write::write_all(&mut zip, manifest_bytes.as_bytes()).map_err(map_err)?;
+
+    // Write project thumbnail
+    if let Some(ref tp) = thumb_path {
+        let src = Path::new(tp);
+        if src.exists() {
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
+            zip.start_file(format!("thumbnail.{}", ext), options).map_err(map_err)?;
+            let data = fs::read(src).map_err(map_err)?;
+            std::io::Write::write_all(&mut zip, &data).map_err(map_err)?;
+        }
+    }
+
+    // Write files and their thumbnails
+    for (file_id, file_path, filename, _, _, thumb_path, _, _, _, _) in &files {
+        let src = Path::new(file_path);
+        if src.exists() {
+            zip.start_file(format!("files/{}", filename), options).map_err(map_err)?;
+            let data = fs::read(src).map_err(map_err)?;
+            std::io::Write::write_all(&mut zip, &data).map_err(map_err)?;
+        }
+
+        if let Some(tp) = thumb_path {
+            let src_thumb = Path::new(tp);
+            if src_thumb.exists() {
+                let ext = src_thumb.extension().and_then(|e| e.to_str()).unwrap_or("png");
+                zip.start_file(format!("thumbnails/file_{}.{}", file_id, ext), options).map_err(map_err)?;
+                let data = fs::read(src_thumb).map_err(map_err)?;
+                std::io::Write::write_all(&mut zip, &data).map_err(map_err)?;
+            }
+        }
+    }
+
+    zip.finish().map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Project> {
+    let conn = db.conn();
+    let conn = conn.as_ref().unwrap();
+
+    let file = fs::File::open(&file_path).map_err(map_err)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(map_err)?;
+
+    // Read manifest
+    let manifest: serde_json::Value = {
+        let manifest_file = archive.by_name("manifest.json").map_err(map_err)?;
+        serde_json::from_reader(manifest_file).map_err(map_err)?
+    };
+
+    let version = manifest["version"].as_i64().unwrap_or(0);
+    if version != 1 {
+        return Err(format!("Unsupported project export version: {}", version));
+    }
+
+    let project_data = &manifest["project"];
+    let new_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let name = project_data["name"].as_str().unwrap_or("Imported Project");
+    let description = project_data["description"].as_str().unwrap_or("");
+    let pw = project_data["print_width_mm"].as_f64();
+    let ph = project_data["print_height_mm"].as_f64();
+    let pt = project_data["print_time_mins"].as_i64();
+
+    // Create project
+    conn.execute(
+        "INSERT INTO projects (id, name, description, print_width_mm, print_height_mm, print_time_mins, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![new_id, name, description, pw, ph, pt, now, now],
+    ).map_err(map_err)?;
+
+    // Create directories
+    let project_dir = Database::data_dir().join("projects").join(&new_id);
+    let files_dir = project_dir.join("files");
+    let thumb_dir = project_dir.join("thumbnails");
+    fs::create_dir_all(&files_dir).map_err(map_err)?;
+    fs::create_dir_all(&thumb_dir).map_err(map_err)?;
+
+    // Extract project thumbnail
+    let mut cover_thumb_path: Option<String> = None;
+    for ext in &["png", "jpg", "jpeg", "svg", "webp"] {
+        let thumb_name = format!("thumbnail.{}", ext);
+        if let Ok(mut entry) = archive.by_name(&thumb_name) {
+            let dest = thumb_dir.join(format!("cover.{}", ext));
+            let mut out = fs::File::create(&dest).map_err(map_err)?;
+            std::io::copy(&mut entry, &mut out).map_err(map_err)?;
+            cover_thumb_path = Some(dest.to_string_lossy().to_string());
+            break;
+        }
+    }
+
+    if let Some(ref tp) = cover_thumb_path {
+        conn.execute(
+            "UPDATE projects SET thumbnail_path = ?1 WHERE id = ?2",
+            rusqlite::params![tp, new_id],
+        ).map_err(map_err)?;
+    }
+
+    // Import tags (create if they don't exist, then link)
+    if let Some(tags) = manifest["tags"].as_array() {
+        for tag in tags {
+            let tag_name = match tag["name"].as_str() {
+                Some(n) => n,
+                None => continue,
+            };
+            let tag_color = tag["color"].as_str().unwrap_or("#6366f1");
+
+            // Find or create tag
+            let tag_id: String = match conn.query_row(
+                "SELECT id FROM tags WHERE LOWER(name) = LOWER(?1)",
+                rusqlite::params![tag_name],
+                |row| row.get(0),
+            ) {
+                Ok(id) => id,
+                Err(_) => {
+                    let new_tag_id = Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO tags (id, name, color) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![new_tag_id, tag_name, tag_color],
+                    ).map_err(map_err)?;
+                    new_tag_id
+                }
+            };
+
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO project_tags (project_id, tag_id) VALUES (?1, ?2)",
+                rusqlite::params![new_id, tag_id],
+            );
+        }
+    }
+
+    // Import collections (create if they don't exist, then link)
+    if let Some(collections) = manifest["collections"].as_array() {
+        for coll in collections {
+            let coll_name = match coll["name"].as_str() {
+                Some(n) => n,
+                None => continue,
+            };
+            let coll_desc = coll["description"].as_str().unwrap_or("");
+
+            let coll_id: String = match conn.query_row(
+                "SELECT id FROM collections WHERE LOWER(name) = LOWER(?1)",
+                rusqlite::params![coll_name],
+                |row| row.get(0),
+            ) {
+                Ok(id) => id,
+                Err(_) => {
+                    let new_coll_id = Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO collections (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![new_coll_id, coll_name, coll_desc, now, now],
+                    ).map_err(map_err)?;
+                    new_coll_id
+                }
+            };
+
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO project_collections (project_id, collection_id) VALUES (?1, ?2)",
+                rusqlite::params![new_id, coll_id],
+            );
+        }
+    }
+
+    // Import files
+    if let Some(file_entries) = manifest["files"].as_array() {
+        for file_entry in file_entries {
+            let filename = match file_entry["original_filename"].as_str() {
+                Some(f) => f,
+                None => continue,
+            };
+            let notes = file_entry["notes"].as_str().unwrap_or("");
+            let favorited = file_entry["favorited"].as_bool().unwrap_or(false);
+            let metadata = file_entry["metadata"].as_str().unwrap_or("{}");
+            let created_at = file_entry["created_at"].as_str().unwrap_or(&now);
+            let modified_at = file_entry["modified_at"].as_str().unwrap_or(&now);
+
+            // Extract file from archive
+            let archive_path = format!("files/{}", filename);
+            let file_dest = files_dir.join(filename);
+            if let Ok(mut entry) = archive.by_name(&archive_path) {
+                let mut out = fs::File::create(&file_dest).map_err(map_err)?;
+                std::io::copy(&mut entry, &mut out).map_err(map_err)?;
+            } else {
+                continue; // skip files not found in archive
+            }
+
+            let file_size = fs::metadata(&file_dest).map(|m| m.len() as i64).unwrap_or(0);
+            let new_file_id = Uuid::new_v4().to_string();
+
+            let mut file_thumb_path: Option<String> = None;
+            // Re-generate thumbnails for 3MF files during import
+            let ext = filename.split('.').last().unwrap_or("").to_lowercase();
+            if ext == "3mf" {
+                file_thumb_path = thumbnails::extract_3mf_thumbnail(&file_dest)
+                    .and_then(|bytes| {
+                        thumbnails::generate_thumbnail(&bytes, &thumb_dir, &format!("file_{}.png", new_file_id))
+                    })
+                    .map(|p| p.to_string_lossy().to_string());
+            }
+
+            conn.execute(
+                "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                rusqlite::params![new_file_id, new_id, file_dest.to_string_lossy().to_string(), filename, file_size, notes, file_thumb_path, favorited, metadata, created_at, modified_at],
+            ).map_err(map_err)?;
+        }
+    }
+
+    // Import filaments
+    if let Some(filament_entries) = manifest["filaments"].as_array() {
+        for entry in filament_entries {
+            let parsed_color = entry["parsed_color"].as_str().unwrap_or("");
+            let parsed_brand = entry["parsed_brand"].as_str().unwrap_or("");
+            let parsed_name = entry["parsed_name"].as_str().unwrap_or("");
+            let parsed_td = entry["parsed_td"].as_f64();
+            let is_manual = entry["is_manual"].as_bool().unwrap_or(false);
+
+            // If there's curated filament data, ensure it exists in the shared db
+            let mut curated_id: Option<String> = None;
+            let mut match_status = "unmatched".to_string();
+
+            if let Some(curated) = entry["curated_filament"].as_object() {
+                let cf_brand = curated.get("brand").and_then(|v| v.as_str()).unwrap_or("");
+                let cf_line = curated.get("line").and_then(|v| v.as_str()).unwrap_or("");
+                let cf_name = curated.get("name").and_then(|v| v.as_str()).unwrap_or("");
+
+                // Try to find existing curated filament
+                match conn.query_row(
+                    "SELECT id FROM shared.curated_filaments WHERE LOWER(brand) = LOWER(?1) AND LOWER(line) = LOWER(?2) AND LOWER(name) = LOWER(?3)",
+                    rusqlite::params![cf_brand, cf_line, cf_name],
+                    |row| row.get::<_, String>(0),
+                ) {
+                    Ok(id) => {
+                        curated_id = Some(id);
+                        match_status = entry["match_status"].as_str().unwrap_or("exact").to_string();
+                    }
+                    Err(_) => {
+                        // Try to match using the standard matching algorithm
+                        match Database::find_match(conn, parsed_color, parsed_brand, parsed_name).map_err(map_err)? {
+                            Some((id, status)) => {
+                                curated_id = Some(id);
+                                match_status = status;
+                            }
+                            None => {}
+                        }
+                    }
+                }
+            } else {
+                // No curated data, try matching
+                match Database::find_match(conn, parsed_color, parsed_brand, parsed_name).map_err(map_err)? {
+                    Some((id, status)) => {
+                        curated_id = Some(id);
+                        match_status = status;
+                    }
+                    None => {}
+                }
+            }
+
+            let pf_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO project_filaments (id, project_id, file_id, curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual)
+                 VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![pf_id, new_id, curated_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual],
+            ).map_err(map_err)?;
+        }
+    }
+
+    let tags = get_project_tags(conn, &new_id).map_err(map_err)?;
+    let collections = get_project_collections(conn, &new_id).map_err(map_err)?;
+
+    Ok(Project {
+        id: new_id,
+        name: name.to_string(),
+        description: description.to_string(),
+        thumbnail_path: cover_thumb_path,
+        created_at: now.clone(),
+        updated_at: now,
+        tags,
+        collections,
+        print_width_mm: pw,
+        print_height_mm: ph,
+        print_time_mins: pt,
+    })
+}
+
 #[tauri::command]
 pub fn get_data_dir() -> String {
     Database::data_dir().to_string_lossy().to_string()

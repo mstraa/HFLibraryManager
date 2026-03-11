@@ -6,6 +6,7 @@ interface CreateProjectDialogProps {
   open: boolean;
   onClose: () => void;
   onCreate: (name: string, description: string, importFolder?: string) => void;
+  onImportProject?: () => void;
   loading?: boolean;
 }
 
@@ -13,6 +14,7 @@ export default function CreateProjectDialog({
   open: isOpen,
   onClose,
   onCreate,
+  onImportProject,
   loading,
 }: CreateProjectDialogProps) {
   const [name, setName] = useState("");
@@ -113,28 +115,45 @@ export default function CreateProjectDialog({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!name.trim() || loading}
-              className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
-            >
-              {loading && (
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          <div className="flex justify-between items-center pt-2">
+            {onImportProject ? (
+              <button
+                type="button"
+                onClick={() => { onClose(); onImportProject(); }}
+                disabled={loading}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-              )}
-              {loading ? "Importing..." : "Create"}
-            </button>
+                Import .hllmproject
+              </button>
+            ) : (
+              <div />
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!name.trim() || loading}
+                className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+              >
+                {loading && (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                )}
+                {loading ? "Importing..." : "Create"}
+              </button>
+            </div>
           </div>
         </form>
     </Modal>

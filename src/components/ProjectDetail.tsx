@@ -20,6 +20,7 @@ import {
   openFileWithApp,
   revealInFinder,
   duplicateProject,
+  exportProject,
   createTag,
   createCollection,
   addManualProjectFilament,
@@ -33,6 +34,7 @@ import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
 import { onDragMouseDown } from "../hooks/useDrag";
 import { useFileDrop } from "../hooks/useFileDrop";
+import { save } from "@tauri-apps/plugin-dialog";
 
 interface ProjectDetailProps {
   projectId: string;
@@ -209,6 +211,23 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     onDeleted();
   }
 
+  async function handleExport() {
+    if (!project) return;
+    const safeName = project.name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "project";
+    const destPath = await save({
+      defaultPath: `${safeName}.hllmproject`,
+      filters: [{ name: "HF Library Project", extensions: ["hllmproject"] }],
+    });
+    if (!destPath) return;
+    const path = typeof destPath === "string" ? destPath : (destPath as { path: string }).path;
+    if (!path) return;
+    try {
+      await exportProject(projectId, path);
+    } catch (e) {
+      console.error("Export failed:", e);
+    }
+  }
+
   // Handle file/folder drop into project
   const handleFileDrop = useCallback(async (paths: string[]) => {
     setImportingFiles(true);
@@ -370,6 +389,15 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
                 Duplicate
+              </button>
+              <button
+                onClick={() => { setShowMoreMenu(false); handleExport(); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Export
               </button>
               <button
                 onClick={() => { setShowMoreMenu(false); handleDelete(); }}
