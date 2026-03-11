@@ -55,6 +55,8 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [editingPrintInfo, setEditingPrintInfo] = useState(false);
   const [editWidth, setEditWidth] = useState("");
@@ -211,6 +213,12 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     onDeleted();
   }
 
+  function showToast(message: string, type: "success" | "error") {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }
+
   async function handleExport() {
     if (!project) return;
     const safeName = project.name.replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "project";
@@ -223,8 +231,9 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     if (!path) return;
     try {
       await exportProject(projectId, path);
+      showToast("Project exported successfully", "success");
     } catch (e) {
-      console.error("Export failed:", e);
+      showToast(`Export failed: ${e}`, "error");
     }
   }
 
@@ -1198,6 +1207,17 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
             className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium transition-all ${
+          toast.type === "error"
+            ? "bg-red-500 text-white"
+            : "bg-green-600 text-white"
+        }`}>
+          {toast.message}
         </div>
       )}
     </div>

@@ -20,6 +20,8 @@ import "./App.css";
 function App() {
   const [showWelcome, setShowWelcome] = useState<boolean | null>(null); // null = loading
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("created_at");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -152,6 +154,12 @@ function App() {
     }
   }
 
+  function showToast(message: string, type: "success" | "error") {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000);
+  }
+
   async function handleImportProject(filePath?: string) {
     let path = filePath;
     if (!path) {
@@ -166,10 +174,11 @@ function App() {
     setImporting(true);
     try {
       const project = await importProject(path);
+      showToast("Project imported successfully", "success");
       navigateTo(project.id);
       setSidebarRefreshKey((k) => k + 1);
     } catch (e) {
-      console.error("Import failed:", e);
+      showToast(`Import failed: ${e}`, "error");
     } finally {
       setImporting(false);
     }
@@ -473,6 +482,17 @@ function App() {
         onImportProject={() => handleImportProject()}
         loading={importing}
       />
+
+      {/* Toast notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium ${
+          toast.type === "error"
+            ? "bg-red-500 text-white"
+            : "bg-green-600 text-white"
+        }`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

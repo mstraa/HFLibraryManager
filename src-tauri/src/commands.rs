@@ -24,12 +24,26 @@ fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// Validate a filename is safe (no path traversal, no empty).
+fn is_safe_filename(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
+        && name != "."
+        && name != ".."
+        && name.len() <= 255
+}
+
+/// Max file size for reading into memory (500 MB).
+const MAX_FILE_SIZE: u64 = 500 * 1024 * 1024;
+
 // ── Projects ──
 
 #[tauri::command]
 pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResult<Project> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let description = req.description.unwrap_or_default();
@@ -63,7 +77,7 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
 #[tauri::command]
 pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let mut stmt = conn.prepare(
         "SELECT id, name, description, thumbnail_path, created_at, updated_at, print_width_mm, print_height_mm, print_time_mins FROM projects WHERE id = ?1"
@@ -94,7 +108,7 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
 #[tauri::command]
 pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let now = Utc::now().to_rfc3339();
 
     if let Some(name) = &req.name {
@@ -123,7 +137,7 @@ pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest
 #[tauri::command]
 pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute("DELETE FROM projects WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
 
     // Move project folder to deleted/
@@ -144,7 +158,7 @@ pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
 #[tauri::command]
 pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let new_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -276,7 +290,7 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
 #[tauri::command]
 pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult<Vec<ProjectSummary>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let mut conditions = vec!["1=1".to_string()];
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
@@ -452,11 +466,115 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
 
     let mut projects: Vec<ProjectSummary> = Vec::new();
     for row in rows {
-        let mut p = row.map_err(map_err)?;
-        p.tags = get_project_tags(&conn, &p.id).map_err(map_err)?;
-        p.filaments = get_project_filaments(&conn, &p.id).map_err(map_err)?;
-        p.size = get_project_size(&conn, &p.id).map_err(map_err)?;
-        projects.push(p);
+        projects.push(row.map_err(map_err)?);
+    }
+
+    if projects.is_empty() {
+        return Ok(projects);
+    }
+
+    // Batch-fetch tags for all projects in one query
+    {
+        let mut tag_stmt = conn.prepare(
+            "SELECT pt.project_id, t.id, t.name, t.color FROM tags t
+             INNER JOIN project_tags pt ON t.id = pt.tag_id ORDER BY t.name"
+        ).map_err(map_err)?;
+        let tag_rows = tag_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, Tag { id: row.get(1)?, name: row.get(2)?, color: row.get(3)? }))
+        }).map_err(map_err)?;
+        let mut tags_by_project: std::collections::HashMap<String, Vec<Tag>> = std::collections::HashMap::new();
+        for row in tag_rows {
+            if let Ok((pid, tag)) = row {
+                tags_by_project.entry(pid).or_default().push(tag);
+            }
+        }
+        for p in &mut projects {
+            if let Some(tags) = tags_by_project.remove(&p.id) {
+                p.tags = tags;
+            }
+        }
+    }
+
+    // Batch-fetch filaments for all projects in one query
+    {
+        let mut pf_stmt = conn.prepare(
+            "SELECT pf.project_id, pf.id, pf.curated_filament_id, pf.parsed_color, pf.parsed_brand, pf.parsed_name, pf.parsed_td, pf.match_status,
+                    cf.brand, cf.line, cf.material, cf.name, cf.color, cf.transmission_distance, cf.owned, pf.is_manual
+             FROM project_filaments pf
+             LEFT JOIN shared.curated_filaments cf ON pf.curated_filament_id = cf.id
+             ORDER BY COALESCE(cf.brand, pf.parsed_brand), COALESCE(cf.name, pf.parsed_name)"
+        ).map_err(map_err)?;
+        let pf_rows = pf_stmt.query_map([], |row| {
+            let project_id: String = row.get(0)?;
+            let curated_id: Option<String> = row.get(2)?;
+            let has_curated = curated_id.is_some();
+            Ok((project_id, ProjectFilamentDisplay {
+                project_filament_id: row.get(1)?,
+                curated_filament_id: curated_id,
+                parsed_color: row.get(3)?,
+                parsed_brand: row.get(4)?,
+                parsed_name: row.get(5)?,
+                parsed_td: row.get(6)?,
+                match_status: row.get(7)?,
+                brand: if has_curated { row.get::<_, String>(8).unwrap_or_default() } else { row.get::<_, String>(4).unwrap_or_default() },
+                line: if has_curated { row.get::<_, String>(9).unwrap_or_default() } else { String::new() },
+                material: if has_curated { row.get::<_, String>(10).unwrap_or_default() } else { String::from("PLA") },
+                name: if has_curated { row.get::<_, String>(11).unwrap_or_default() } else { row.get::<_, String>(5).unwrap_or_default() },
+                color: if has_curated { row.get::<_, String>(12).unwrap_or_default() } else { row.get::<_, String>(3).unwrap_or_default() },
+                td: if has_curated { row.get(13)? } else { row.get(6)? },
+                owned: if has_curated { row.get::<_, i32>(14).unwrap_or(0) != 0 } else { false },
+                is_manual: row.get::<_, i32>(15).unwrap_or(0) != 0,
+            }))
+        }).map_err(map_err)?;
+
+        let mut filaments_by_project: std::collections::HashMap<String, Vec<ProjectFilamentDisplay>> = std::collections::HashMap::new();
+        for row in pf_rows {
+            if let Ok((pid, pf)) = row {
+                filaments_by_project.entry(pid).or_default().push(pf);
+            }
+        }
+
+        // Deduplicate filaments per project
+        for p in &mut projects {
+            if let Some(all) = filaments_by_project.remove(&p.id) {
+                let mut seen = std::collections::HashSet::new();
+                for pf in all {
+                    let key = if let Some(ref cid) = pf.curated_filament_id {
+                        cid.clone()
+                    } else {
+                        format!("{}|{}|{}", pf.parsed_color.to_lowercase(), pf.parsed_brand, pf.parsed_name)
+                    };
+                    if seen.insert(key) {
+                        p.filaments.push(pf);
+                    }
+                }
+            }
+        }
+    }
+
+    // Batch-fetch sizes for all projects in one query
+    {
+        let mut size_stmt = conn.prepare(
+            "SELECT project_id,
+                    CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
+                    CAST(ROUND(json_extract(metadata, '$.height_mm')) AS INTEGER) || 'mm'
+             FROM files
+             WHERE favorited = 1
+               AND json_extract(metadata, '$.width_mm') IS NOT NULL
+               AND json_extract(metadata, '$.height_mm') IS NOT NULL"
+        ).map_err(map_err)?;
+        let size_rows = size_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(map_err)?;
+        let mut sizes_by_project: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for row in size_rows {
+            if let Ok((pid, size)) = row {
+                sizes_by_project.entry(pid).or_insert(size);
+            }
+        }
+        for p in &mut projects {
+            p.size = sizes_by_project.remove(&p.id);
+        }
     }
 
     Ok(projects)
@@ -467,7 +585,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
 #[tauri::command]
 pub fn create_tag(db: State<Database>, req: CreateTagRequest) -> CmdResult<Tag> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let id = Uuid::new_v4().to_string();
     let color = req.color.unwrap_or_else(|| "#6366f1".to_string());
 
@@ -482,7 +600,7 @@ pub fn create_tag(db: State<Database>, req: CreateTagRequest) -> CmdResult<Tag> 
 #[tauri::command]
 pub fn list_tags(db: State<Database>) -> CmdResult<Vec<TagWithCount>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let mut stmt = conn.prepare(
         "SELECT t.id, t.name, t.color, COUNT(pt.project_id) as cnt
          FROM tags t LEFT JOIN project_tags pt ON t.id = pt.tag_id
@@ -504,7 +622,7 @@ pub fn list_tags(db: State<Database>) -> CmdResult<Vec<TagWithCount>> {
 #[tauri::command]
 pub fn update_tag(db: State<Database>, id: String, req: UpdateTagRequest) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     if let Some(name) = &req.name {
         conn.execute("UPDATE tags SET name = ?1 WHERE id = ?2", rusqlite::params![name, id]).map_err(map_err)?;
     }
@@ -517,7 +635,7 @@ pub fn update_tag(db: State<Database>, id: String, req: UpdateTagRequest) -> Cmd
 #[tauri::command]
 pub fn delete_tag(db: State<Database>, id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
     Ok(())
 }
@@ -525,7 +643,7 @@ pub fn delete_tag(db: State<Database>, id: String) -> CmdResult<()> {
 #[tauri::command]
 pub fn set_project_tags(db: State<Database>, project_id: String, tag_ids: Vec<String>) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute("DELETE FROM project_tags WHERE project_id = ?1", rusqlite::params![project_id]).map_err(map_err)?;
     for tag_id in &tag_ids {
         conn.execute(
@@ -543,7 +661,7 @@ pub fn set_project_tags(db: State<Database>, project_id: String, tag_ids: Vec<St
 #[tauri::command]
 pub fn create_collection(db: State<Database>, req: CreateCollectionRequest) -> CmdResult<Collection> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let description = req.description.unwrap_or_default();
@@ -564,7 +682,7 @@ pub fn create_collection(db: State<Database>, req: CreateCollectionRequest) -> C
 #[tauri::command]
 pub fn list_collections(db: State<Database>) -> CmdResult<Vec<Collection>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let mut stmt = conn.prepare(
         "SELECT c.id, c.name, c.description, c.cover_image_path, c.created_at, c.updated_at, COUNT(pc.project_id) as cnt
          FROM collections c LEFT JOIN project_collections pc ON c.id = pc.collection_id
@@ -589,7 +707,7 @@ pub fn list_collections(db: State<Database>) -> CmdResult<Vec<Collection>> {
 #[tauri::command]
 pub fn update_collection(db: State<Database>, id: String, req: UpdateCollectionRequest) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let now = Utc::now().to_rfc3339();
     if let Some(name) = &req.name {
         conn.execute("UPDATE collections SET name = ?1, updated_at = ?2 WHERE id = ?3",
@@ -605,7 +723,7 @@ pub fn update_collection(db: State<Database>, id: String, req: UpdateCollectionR
 #[tauri::command]
 pub fn delete_collection(db: State<Database>, id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute("DELETE FROM collections WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
     Ok(())
 }
@@ -613,7 +731,7 @@ pub fn delete_collection(db: State<Database>, id: String) -> CmdResult<()> {
 #[tauri::command]
 pub fn add_project_to_collection(db: State<Database>, project_id: String, collection_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute(
         "INSERT OR IGNORE INTO project_collections (project_id, collection_id) VALUES (?1, ?2)",
         rusqlite::params![project_id, collection_id],
@@ -624,7 +742,7 @@ pub fn add_project_to_collection(db: State<Database>, project_id: String, collec
 #[tauri::command]
 pub fn remove_project_from_collection(db: State<Database>, project_id: String, collection_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute(
         "DELETE FROM project_collections WHERE project_id = ?1 AND collection_id = ?2",
         rusqlite::params![project_id, collection_id],
@@ -637,7 +755,7 @@ pub fn remove_project_from_collection(db: State<Database>, project_id: String, c
 #[tauri::command]
 pub fn get_project_files(db: State<Database>, project_id: String) -> CmdResult<Vec<ProjectFile>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let mut stmt = conn.prepare(
         "SELECT id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at
@@ -670,7 +788,7 @@ pub fn import_files(
     source_paths: Vec<String>,
 ) -> CmdResult<Vec<ProjectFile>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let files_dir = Database::data_dir()
         .join("projects")
         .join(&project_id)
@@ -775,7 +893,7 @@ pub fn import_files(
 #[tauri::command]
 pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let (file_path, project_id): (String, String) = conn.query_row(
         "SELECT file_path, project_id FROM files WHERE id = ?1",
@@ -827,7 +945,7 @@ pub fn delete_file(db: State<Database>, file_id: String) -> CmdResult<()> {
 #[tauri::command]
 pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute(
         "UPDATE files SET notes = ?1 WHERE id = ?2",
         rusqlite::params![notes, file_id],
@@ -838,7 +956,7 @@ pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) ->
 #[tauri::command]
 pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<bool> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let (current, file_path, filename): (i32, String, String) = conn.query_row(
         "SELECT favorited, file_path, original_filename FROM files WHERE id = ?1",
         rusqlite::params![file_id],
@@ -1355,7 +1473,7 @@ fn parse_3mf_settings_id(settings_id: &str, vendor: &str, material: &str) -> (St
 #[tauri::command]
 pub fn set_project_thumbnail(db: State<Database>, project_id: String, source_path: String) -> CmdResult<String> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let dest_dir = Database::data_dir().join("projects").join(&project_id).join("thumbnails");
     let source = Path::new(&source_path);
@@ -1481,7 +1599,7 @@ pub fn read_text_file(path: String) -> CmdResult<String> {
 #[tauri::command]
 pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<SyncResult> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let files_dir = Database::data_dir()
         .join("projects")
         .join(&project_id)
@@ -1591,7 +1709,7 @@ pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilament>
 #[tauri::command]
 pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let mut stmt = conn.prepare(
         "SELECT DISTINCT
             CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
@@ -1612,7 +1730,7 @@ pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
 #[tauri::command]
 pub fn list_curated_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilament>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let mut stmt = conn.prepare(
         "SELECT id, brand, line, material, name, color, transmission_distance, owned, source_uuid, created_at, updated_at
          FROM shared.curated_filaments ORDER BY brand, line, name"
@@ -1639,7 +1757,7 @@ pub fn list_curated_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilam
 #[tauri::command]
 pub fn list_used_curated_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilamentWithCount>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let mut stmt = conn.prepare(
         "SELECT cf.id, cf.brand, cf.line, cf.material, cf.name, cf.color, cf.transmission_distance, cf.owned, cf.source_uuid, cf.created_at, cf.updated_at,
                 COUNT(DISTINCT pf.project_id) as project_count
@@ -1671,7 +1789,7 @@ pub fn list_used_curated_filaments(db: State<Database>) -> CmdResult<Vec<Curated
 #[tauri::command]
 pub fn create_curated_filament(db: State<Database>, req: CreateCuratedFilamentRequest) -> CmdResult<CuratedFilament> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let line = req.line.unwrap_or_default();
@@ -1699,7 +1817,7 @@ pub fn create_curated_filament(db: State<Database>, req: CreateCuratedFilamentRe
 #[tauri::command]
 pub fn update_curated_filament(db: State<Database>, id: String, req: UpdateCuratedFilamentRequest) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let now = Utc::now().to_rfc3339();
 
     if let Some(brand) = &req.brand {
@@ -1736,7 +1854,7 @@ pub fn update_curated_filament(db: State<Database>, id: String, req: UpdateCurat
 #[tauri::command]
 pub fn delete_curated_filament(db: State<Database>, id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute("DELETE FROM shared.curated_filaments WHERE id = ?1", rusqlite::params![id]).map_err(map_err)?;
     Ok(())
 }
@@ -1744,7 +1862,7 @@ pub fn delete_curated_filament(db: State<Database>, id: String) -> CmdResult<()>
 #[tauri::command]
 pub fn import_curated_filaments(db: State<Database>, file_path: String) -> CmdResult<i32> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let content = fs::read_to_string(&file_path).map_err(map_err)?;
     let json: serde_json::Value = serde_json::from_str(&content).map_err(map_err)?;
 
@@ -1801,14 +1919,14 @@ pub fn import_curated_filaments(db: State<Database>, file_path: String) -> CmdRe
 #[tauri::command]
 pub fn get_project_filaments_v2(db: State<Database>, project_id: String) -> CmdResult<Vec<ProjectFilamentDisplay>> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     get_project_filaments_display(conn, &project_id).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn match_project_filament(db: State<Database>, req: MatchFilamentRequest) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute(
         "UPDATE project_filaments SET curated_filament_id = ?1, match_status = 'confirmed' WHERE id = ?2",
         rusqlite::params![req.curated_filament_id, req.project_filament_id],
@@ -1819,7 +1937,7 @@ pub fn match_project_filament(db: State<Database>, req: MatchFilamentRequest) ->
 #[tauri::command]
 pub fn unmatch_project_filament(db: State<Database>, project_filament_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute(
         "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched' WHERE id = ?1",
         rusqlite::params![project_filament_id],
@@ -1830,7 +1948,7 @@ pub fn unmatch_project_filament(db: State<Database>, project_filament_id: String
 #[tauri::command]
 pub fn rematch_all_project_filaments(db: State<Database>, project_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     // Reset all non-confirmed matches
     conn.execute(
         "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched' WHERE project_id = ?1 AND match_status != 'confirmed'",
@@ -1843,7 +1961,7 @@ pub fn rematch_all_project_filaments(db: State<Database>, project_id: String) ->
 #[tauri::command]
 pub fn rematch_unmatched_filaments(db: State<Database>) -> CmdResult<u32> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let before: u32 = conn.query_row(
         "SELECT COUNT(*) FROM project_filaments WHERE match_status = 'unmatched'",
         [],
@@ -1861,7 +1979,7 @@ pub fn rematch_unmatched_filaments(db: State<Database>) -> CmdResult<u32> {
 #[tauri::command]
 pub fn clear_all_curated_filaments(db: State<Database>) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     // Clear matches that reference curated filaments
     conn.execute(
         "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched'",
@@ -1874,7 +1992,7 @@ pub fn clear_all_curated_filaments(db: State<Database>) -> CmdResult<()> {
 #[tauri::command]
 pub fn reset_curated_filaments(db: State<Database>) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     // Clear matches and delete all curated filaments
     conn.execute(
         "UPDATE project_filaments SET curated_filament_id = NULL, match_status = 'unmatched'",
@@ -1889,7 +2007,7 @@ pub fn reset_curated_filaments(db: State<Database>) -> CmdResult<()> {
 #[tauri::command]
 pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     // Delete all non-manual project_filaments (preserve manually added ones)
     conn.execute("DELETE FROM project_filaments WHERE is_manual = 0", []).map_err(map_err)?;
@@ -1961,7 +2079,7 @@ pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
 #[tauri::command]
 pub fn add_manual_project_filament(db: State<Database>, project_id: String, curated_filament_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     // Look up the curated filament
     let (color, brand, line, name, td): (String, String, String, String, Option<f64>) = conn.query_row(
@@ -1985,7 +2103,7 @@ pub fn add_manual_project_filament(db: State<Database>, project_id: String, cura
 #[tauri::command]
 pub fn remove_project_filament(db: State<Database>, project_filament_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     conn.execute(
         "DELETE FROM project_filaments WHERE id = ?1",
         rusqlite::params![project_filament_id],
@@ -1996,7 +2114,7 @@ pub fn remove_project_filament(db: State<Database>, project_filament_id: String)
 #[tauri::command]
 pub fn reset_project_filament(db: State<Database>, project_filament_id: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     // Get the parsed values from the project_filament
     let (parsed_color, parsed_brand, parsed_name): (String, String, String) = conn.query_row(
@@ -2029,7 +2147,7 @@ pub fn reset_project_filament(db: State<Database>, project_filament_id: String) 
 #[tauri::command]
 pub fn export_data(db: State<Database>) -> CmdResult<String> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let mut projects = Vec::new();
     {
@@ -2101,7 +2219,7 @@ pub fn export_data(db: State<Database>) -> CmdResult<String> {
 #[tauri::command]
 pub fn export_project(db: State<Database>, project_id: String, dest_path: String) -> CmdResult<()> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     // Get project
     let (name, description, thumb_path, created_at, updated_at, pw, ph, pt): (String, String, Option<String>, String, String, Option<f64>, Option<f64>, Option<i64>) = conn.query_row(
@@ -2221,18 +2339,23 @@ pub fn export_project(db: State<Database>, project_id: String, dest_path: String
         if src.exists() {
             let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
             zip.start_file(format!("thumbnail.{}", ext), options).map_err(map_err)?;
-            let data = fs::read(src).map_err(map_err)?;
-            std::io::Write::write_all(&mut zip, &data).map_err(map_err)?;
+            let mut f = fs::File::open(src).map_err(map_err)?;
+            std::io::copy(&mut f, &mut zip).map_err(map_err)?;
         }
     }
 
-    // Write files and their thumbnails
+    // Write files and their thumbnails (streaming to avoid loading into memory)
     for (file_id, file_path, filename, _, _, thumb_path, _, _, _, _) in &files {
         let src = Path::new(file_path);
         if src.exists() {
+            let file_size = fs::metadata(src).map(|m| m.len()).unwrap_or(0);
+            if file_size > MAX_FILE_SIZE {
+                eprintln!("Skipping oversized file in export: {} ({} bytes)", filename, file_size);
+                continue;
+            }
             zip.start_file(format!("files/{}", filename), options).map_err(map_err)?;
-            let data = fs::read(src).map_err(map_err)?;
-            std::io::Write::write_all(&mut zip, &data).map_err(map_err)?;
+            let mut f = fs::File::open(src).map_err(map_err)?;
+            std::io::copy(&mut f, &mut zip).map_err(map_err)?;
         }
 
         if let Some(tp) = thumb_path {
@@ -2240,8 +2363,8 @@ pub fn export_project(db: State<Database>, project_id: String, dest_path: String
             if src_thumb.exists() {
                 let ext = src_thumb.extension().and_then(|e| e.to_str()).unwrap_or("png");
                 zip.start_file(format!("thumbnails/file_{}.{}", file_id, ext), options).map_err(map_err)?;
-                let data = fs::read(src_thumb).map_err(map_err)?;
-                std::io::Write::write_all(&mut zip, &data).map_err(map_err)?;
+                let mut f = fs::File::open(src_thumb).map_err(map_err)?;
+                std::io::copy(&mut f, &mut zip).map_err(map_err)?;
             }
         }
     }
@@ -2253,7 +2376,7 @@ pub fn export_project(db: State<Database>, project_id: String, dest_path: String
 #[tauri::command]
 pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Project> {
     let conn = db.conn();
-    let conn = conn.as_ref().unwrap();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let file = fs::File::open(&file_path).map_err(map_err)?;
     let mut archive = zip::ZipArchive::new(file).map_err(map_err)?;
@@ -2383,6 +2506,13 @@ pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Proje
                 Some(f) => f,
                 None => continue,
             };
+
+            // Validate filename to prevent path traversal (zip slip)
+            if !is_safe_filename(filename) {
+                eprintln!("Skipping unsafe filename in import: {:?}", filename);
+                continue;
+            }
+
             let notes = file_entry["notes"].as_str().unwrap_or("");
             let favorited = file_entry["favorited"].as_bool().unwrap_or(false);
             let metadata = file_entry["metadata"].as_str().unwrap_or("{}");
@@ -2392,9 +2522,26 @@ pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Proje
             // Extract file from archive
             let archive_path = format!("files/{}", filename);
             let file_dest = files_dir.join(filename);
+
+            // Verify the resolved path is within the target directory
+            let canonical_files_dir = fs::canonicalize(&files_dir).map_err(map_err)?;
             if let Ok(mut entry) = archive.by_name(&archive_path) {
+                // Check entry size before extracting
+                if entry.size() > MAX_FILE_SIZE {
+                    eprintln!("Skipping oversized file in import: {} ({} bytes)", filename, entry.size());
+                    continue;
+                }
                 let mut out = fs::File::create(&file_dest).map_err(map_err)?;
                 std::io::copy(&mut entry, &mut out).map_err(map_err)?;
+
+                // Verify file was written inside the expected directory
+                if let Ok(canonical_dest) = fs::canonicalize(&file_dest) {
+                    if !canonical_dest.starts_with(&canonical_files_dir) {
+                        let _ = fs::remove_file(&file_dest);
+                        eprintln!("Path traversal detected, removed: {:?}", file_dest);
+                        continue;
+                    }
+                }
             } else {
                 continue; // skip files not found in archive
             }
@@ -2666,10 +2813,6 @@ fn get_project_tags(conn: &Connection, project_id: &str) -> Result<Vec<Tag>, rus
     rows.collect()
 }
 
-fn get_project_filaments(conn: &Connection, project_id: &str) -> Result<Vec<ProjectFilamentDisplay>, rusqlite::Error> {
-    get_project_filaments_display(conn, project_id)
-}
-
 fn get_project_filaments_display(conn: &Connection, project_id: &str) -> Result<Vec<ProjectFilamentDisplay>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT pf.id, pf.curated_filament_id, pf.parsed_color, pf.parsed_brand, pf.parsed_name, pf.parsed_td, pf.match_status,
@@ -2717,24 +2860,6 @@ fn get_project_filaments_display(conn: &Connection, project_id: &str) -> Result<
         result.push(pf);
     }
     Ok(result)
-}
-
-fn get_project_size(conn: &Connection, project_id: &str) -> Result<Option<String>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT
-            CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
-            CAST(ROUND(json_extract(metadata, '$.height_mm')) AS INTEGER) || 'mm'
-         FROM files
-         WHERE project_id = ?1 AND favorited = 1
-           AND json_extract(metadata, '$.width_mm') IS NOT NULL
-           AND json_extract(metadata, '$.height_mm') IS NOT NULL
-         LIMIT 1"
-    )?;
-    let mut rows = stmt.query_map(rusqlite::params![project_id], |row| row.get::<_, String>(0))?;
-    match rows.next() {
-        Some(Ok(size)) => Ok(Some(size)),
-        _ => Ok(None),
-    }
 }
 
 fn get_project_collections(conn: &Connection, project_id: &str) -> Result<Vec<CollectionSummary>, rusqlite::Error> {
