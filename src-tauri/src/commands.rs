@@ -1433,12 +1433,36 @@ pub fn open_file_with_app(path: String, app: String) -> CmdResult<()> {
     if !Path::new(&path).is_file() {
         return Err("File does not exist".to_string());
     }
-    std::process::Command::new("open")
-        .arg("-a")
-        .arg(&app)
-        .arg(&path)
-        .spawn()
-        .map_err(map_err)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-a")
+            .arg(&app)
+            .arg(&path)
+            .spawn()
+            .map_err(map_err)?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, try to launch the app executable directly with the file as argument
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &app, &path])
+            .spawn()
+            .map_err(map_err)?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, try launching the app binary (lowercase) with the file as argument
+        let app_lower = app.to_lowercase().replace(' ', "");
+        std::process::Command::new(&app_lower)
+            .arg(&path)
+            .spawn()
+            .map_err(|_| format!("Could not launch '{}'. Make sure it is installed and in PATH.", app))?;
+    }
+
     Ok(())
 }
 

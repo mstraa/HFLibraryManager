@@ -7,6 +7,7 @@ import { useEffect, useRef } from "react";
  */
 export function useSwipeNavigation(onBack: () => void, onForward: () => void) {
   const cooldownRef = useRef(false);
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onBackRef = useRef(onBack);
   const onForwardRef = useRef(onForward);
   onBackRef.current = onBack;
@@ -19,7 +20,7 @@ export function useSwipeNavigation(onBack: () => void, onForward: () => void) {
       if (cooldownRef.current) return;
 
       cooldownRef.current = true;
-      setTimeout(() => { cooldownRef.current = false; }, 500);
+      cooldownTimerRef.current = setTimeout(() => { cooldownRef.current = false; }, 500);
 
       if (e.deltaX < 0) {
         onBackRef.current();
@@ -29,6 +30,9 @@ export function useSwipeNavigation(onBack: () => void, onForward: () => void) {
     }
 
     window.addEventListener("wheel", handleWheel, { passive: true });
-    return () => window.removeEventListener("wheel", handleWheel);
+    return () => {
+      window.removeEventListener("wheel", handleWheel);
+      if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+    };
   }, []);
 }

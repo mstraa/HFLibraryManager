@@ -43,11 +43,14 @@ fn default_library_path() -> String {
         .to_string()
 }
 
-/// Fixed config directory that never moves
+/// Fixed config directory that never moves.
+/// Uses platform-appropriate location:
+///   macOS:   ~/Library/Application Support/HFLibraryManager
+///   Windows: %APPDATA%\HFLibraryManager
+///   Linux:   ~/.config/HFLibraryManager
 fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not find home directory")
-        .join(".config")
+    dirs::config_dir()
+        .expect("Could not find config directory")
         .join("HFLibraryManager")
 }
 

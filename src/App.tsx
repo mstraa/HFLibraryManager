@@ -241,7 +241,7 @@ function App() {
   const handleFolderDrop = useCallback(async (paths: string[]) => {
     if (activeProjectId) return; // Only on library view
     for (const folderPath of paths) {
-      const folderName = folderPath.split("/").pop() || "Untitled";
+      const folderName = folderPath.split(/[/\\]/).pop() || "Untitled";
       await handleCreate(folderName, "", folderPath, false);
     }
   }, [activeProjectId]);

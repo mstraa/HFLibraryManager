@@ -67,7 +67,7 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
     const path = typeof selected === "string" ? selected : (selected as { path: string }).path;
     if (!path) return;
     // Use folder name as default library name
-    const name = path.split("/").pop() || "Library";
+    const name = path.split(/[/\\]/).pop() || "Library";
     await addLibrary(name, path);
     await loadLibraries();
   }
@@ -201,7 +201,7 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
                         </button>
                       )}
                       <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate font-mono" title={lib.path}>
-                        {lib.path.replace(/^\/Users\/[^/]+/, "~")}
+                        {lib.path.replace(/^(\/Users\/[^/]+|C:\\Users\\[^\\]+)/, "~")}
                       </div>
                     </div>
 

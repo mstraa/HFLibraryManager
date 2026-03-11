@@ -42,7 +42,7 @@ export default function CreateProjectDialog({
       setImportFolder(path);
       // Auto-fill name from folder name if empty
       if (!name.trim()) {
-        const folderName = path.split("/").pop() || "";
+        const folderName = path.split(/[/\\]/).pop() || "";
         if (folderName) setName(folderName);
       }
     }
@@ -93,7 +93,7 @@ export default function CreateProjectDialog({
               {importFolder ? (
                 <div className="flex items-center gap-1.5 min-w-0 flex-1">
                   <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {importFolder.replace(/^\/Users\/[^/]+/, "~")}
+                    {importFolder.replace(/^(\/Users\/[^/]+|C:\\Users\\[^\\]+)/, "~")}
                   </span>
                   <button
                     type="button"

@@ -19,6 +19,13 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -63,7 +70,8 @@ export default function FilamentManager({ onBack }: FilamentManagerProps) {
     const count = await importCuratedFilaments(path);
     await load();
     setToast(`Imported ${count} filaments`);
-    setTimeout(() => setToast(null), 3000);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
   }
 
   async function handleToggleOwned(id: string, current: boolean) {

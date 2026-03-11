@@ -48,7 +48,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const [allCollections, setAllCollections] = useState<Collection[]>([]);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
-  const [saveTimer, setSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -119,25 +119,30 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     }
   }
 
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
   function handleDescriptionChange(value: string) {
     if (!project) return;
     setProject({ ...project, description: value });
 
     // Auto-save with debounce
-    if (saveTimer) clearTimeout(saveTimer);
-    const timer = setTimeout(async () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
       try {
         await updateProject(projectId, { description: value });
       } catch (err) {
         console.error("Failed to save description:", err);
       }
     }, 800);
-    setSaveTimer(timer);
   }
 
   async function handleDescriptionBlur() {
     if (!project) return;
-    if (saveTimer) clearTimeout(saveTimer);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     await updateProject(projectId, { description: project.description });
   }
 
@@ -241,8 +246,10 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const clickedRef = useRef(false);
 
   useEffect(() => {
-    getProjectFilamentsV2(projectId).then(setProjectFilaments).catch(() => {});
-    listCuratedFilaments().then(setCuratedFilaments).catch(() => {});
+    let cancelled = false;
+    getProjectFilamentsV2(projectId).then(data => { if (!cancelled) setProjectFilaments(data); }).catch(() => {});
+    listCuratedFilaments().then(data => { if (!cancelled) setCuratedFilaments(data); }).catch(() => {});
+    return () => { cancelled = true; };
   }, [projectId, files]);
 
 
