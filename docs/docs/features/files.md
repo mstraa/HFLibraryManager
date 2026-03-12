@@ -24,6 +24,8 @@ Files are automatically categorized based on their extension:
 - **Import button** to select files via the native file picker
 - Files are copied into the project's storage directory
 
+You can also import an entire project (with files, filaments, tags, and more) from a `.hllmproject` archive — see [Export & Import](./export-import).
+
 ## Views
 
 Toggle between **List view** and **Grid view**:
