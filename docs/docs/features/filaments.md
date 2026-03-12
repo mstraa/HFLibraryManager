@@ -46,7 +46,7 @@ When you import 3MF files, HF Library Manager automatically:
 
 ## Bulk Operations
 
-- **Rematch all** — Re-run matching for all unmatched filaments across projects
+- **Rematch all** — Re-run matching for all unmatched filaments across projects. Useful after adding new filaments to the library
 - **Reset matches** — Clear all matches and start fresh
 - **Import filaments** — Load filament data from JSON files exported from [HueForge](https://shop.thehueforge.com/) or [3D Filament Profiles](https://3dfilamentprofiles.com/)
 - **Reset to defaults** — Restore the built-in filament library
