@@ -49,6 +49,10 @@ const config: Config = {
     },
     navbar: {
       title: 'HF Library Manager',
+      logo: {
+        alt: 'HF Library Manager Logo',
+        src: 'img/logo.png',
+      },
       items: [
         {
           type: 'docSidebar',
