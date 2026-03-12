@@ -40,6 +40,12 @@ Before creating any release, always run the following checks and fix any issues 
 3. **Security check** — Validate all user inputs, sanitize paths (prevent traversal), prevent injection (SQL, command, FTS5), check for TOCTOU races.
 4. **Dead code check** — Remove unused functions, orphaned files, unused dependencies, and unreachable code paths.
 
+## Documentation
+
+- Keep `README.md` up to date when adding features, changing setup steps, or modifying the tech stack.
+- Keep the project documentation (in `docs/`) up to date when changing user-facing behavior, adding new features, or modifying architecture.
+- Documentation updates should be included in the same commit as the code change they describe.
+
 ## Commit Discipline
 
 - Create a separate commit for each feature, bugfix, or task. Do not bundle unrelated changes.
