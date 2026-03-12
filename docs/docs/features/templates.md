@@ -6,6 +6,12 @@ sidebar_position: 9
 
 Save any project as a reusable template to quickly create new projects with predefined files, filament assignments, and print specifications.
 
+## Tips for Creating Good Templates
+
+Some apps like HueForge or Bambu Studio work best when you open or save files from a specific project folder. By creating a template with placeholder files — a dummy image, a minimal HueForge project, or a blank 3MF file — every new project created from that template will already have the right folder structure. When you open one of these files in the external app, it will default its save and export paths to that project's folder, keeping everything organized automatically.
+
+You can create your own templates, or use ones shared by the community. The best approach is to build them yourself with your own workflow in mind — that way they match exactly how you work with your tools.
+
 ## Creating a Template
 
 1. Open any project
