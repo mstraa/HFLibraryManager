@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
         'features/views',
         'features/libraries',
         'features/templates',
+        'features/export-import',
         'features/keyboard-shortcuts',
       ],
     },
