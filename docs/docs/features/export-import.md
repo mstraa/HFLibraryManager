@@ -72,3 +72,7 @@ ProjectName.hllmproject
 ```
 
 The `manifest.json` uses **version 1** of the format and includes all project metadata, making it fully self-contained and portable across different libraries.
+
+:::tip
+`.hllmproject` files are just `.zip` files. You can rename one to `.zip` and unzip it to inspect or manually edit the contents.
+:::
