@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   getProject,
@@ -21,6 +21,7 @@ import {
   revealInFinder,
   duplicateProject,
   exportProject,
+  setProjectTemplate,
   createTag,
   createCollection,
   addManualProjectFilament,
@@ -28,8 +29,15 @@ import {
   resetProjectFilament,
 } from "../lib/api";
 import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, ProjectFilamentDisplay, CuratedFilament } from "../lib/types";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+const MarkdownRenderer = React.lazy(() =>
+  import("react-markdown").then((mod) => {
+    return import("remark-gfm").then((gfm) => ({
+      default: (props: { children: string }) => (
+        <mod.default remarkPlugins={[gfm.default]}>{props.children}</mod.default>
+      ),
+    }));
+  })
+);
 import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
 import { onDragMouseDown } from "../hooks/useDrag";
@@ -78,26 +86,39 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const [collectionsExpanded, setCollectionsExpanded] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
 
-  const loadProject = useCallback(async (sync = false) => {
+  const loadProjectData = useCallback(async (sync = false) => {
     if (sync) {
       await syncProjectFiles(projectId);
     }
-    const [p, f, t, c] = await Promise.all([
+    const [p, f] = await Promise.all([
       getProject(projectId),
       getProjectFiles(projectId),
-      listTags(),
-      listCollections(),
     ]);
     setProject(p);
     setFiles(f);
-    setAllTags(t);
-    setAllCollections(c);
     setNameInput(p.name);
   }, [projectId]);
 
+  const loadMetadata = useCallback(async () => {
+    const [t, c] = await Promise.all([
+      listTags(),
+      listCollections(),
+    ]);
+    setAllTags(t);
+    setAllCollections(c);
+  }, []);
+
+  const loadProject = useCallback(async (sync = false) => {
+    await Promise.all([loadProjectData(sync), loadMetadata()]);
+  }, [loadProjectData, loadMetadata]);
+
   useEffect(() => {
-    loadProject(true);
-  }, [loadProject]);
+    loadProjectData(true);
+  }, [loadProjectData]);
+
+  useEffect(() => {
+    loadMetadata();
+  }, [loadMetadata]);
 
   // Close more-actions menu on click outside
   useEffect(() => {
@@ -119,7 +140,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     try {
       await updateProject(projectId, { name: nameInput.trim() });
       setEditingName(false);
-      loadProject();
+      loadProjectData();
     } catch (err) {
       console.error("Failed to save name:", err);
     }
@@ -254,12 +275,12 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
       }
       if (allFiles.length > 0) {
         await importFiles(projectId, allFiles);
-        await loadProject();
+        await loadProjectData();
       }
     } finally {
       setImportingFiles(false);
     }
-  }, [projectId, loadProject]);
+  }, [projectId, loadProjectData]);
 
   const { isDragging } = useFileDrop(handleFileDrop);
 
@@ -275,25 +296,32 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
   const changingSearchRef = useRef<HTMLInputElement>(null);
   const clickedRef = useRef(false);
 
+  // Load curated filaments only when project changes (not on every file change)
+  useEffect(() => {
+    let cancelled = false;
+    listCuratedFilaments().then(data => { if (!cancelled) setCuratedFilaments(data); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // Load project filaments when project or files change
   useEffect(() => {
     let cancelled = false;
     getProjectFilamentsV2(projectId).then(data => { if (!cancelled) setProjectFilaments(data); }).catch(() => {});
-    listCuratedFilaments().then(data => { if (!cancelled) setCuratedFilaments(data); }).catch(() => {});
     return () => { cancelled = true; };
   }, [projectId, files]);
 
 
   // Aggregate metadata from favorited files for dimensions
-  const favoritedMeta: FileMetadata[] = files
+  const favoritedMeta: FileMetadata[] = useMemo(() => files
     .filter(f => f.favorited)
     .map(f => {
       try { return JSON.parse(f.metadata) as FileMetadata; }
       catch { return {} as FileMetadata; }
     })
-    .filter(m => m.width_mm || m.height_mm);
+    .filter(m => m.width_mm || m.height_mm), [files]);
 
   // Get dimensions from first file that has them
-  const dimsSource = favoritedMeta.find(m => m.width_mm || m.height_mm);
+  const dimsSource = useMemo(() => favoritedMeta.find(m => m.width_mm || m.height_mm), [favoritedMeta]);
   if (!project) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -306,13 +334,24 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
     <div className="flex-1 flex flex-col h-screen bg-white dark:bg-gray-900 relative">
       {/* Drop overlay */}
       {isDragging && (
-        <div className="absolute inset-0 bg-indigo-500/10 border-2 border-dashed border-indigo-400 rounded-lg flex items-center justify-center z-40 pointer-events-none">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl px-8 py-6 text-center">
-            <svg className="w-12 h-12 mx-auto text-indigo-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">Drop to import files</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Files and folders will be added to this project</p>
+        <div className="absolute inset-0 z-40 pointer-events-none flex flex-col">
+          <div className="flex-1 bg-indigo-500/10 border-2 border-solid border-indigo-400 rounded-t-lg flex items-center justify-center">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl px-8 py-6 text-center">
+              <svg className="w-12 h-12 mx-auto text-indigo-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">Drop to import files</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Files and folders will be added to this project</p>
+            </div>
+          </div>
+          <div className="h-px bg-gray-900 dark:bg-gray-100" />
+          <div className="h-[20%] shrink-0 bg-red-500/25 border-2 border-solid border-red-400 rounded-b-lg flex items-center justify-center">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl px-6 py-3 text-center">
+              <svg className="w-8 h-8 mx-auto text-red-500 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <p className="text-sm font-semibold text-red-600 dark:text-red-400">Drop here to cancel</p>
+            </div>
           </div>
         </div>
       )}
@@ -409,6 +448,25 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                 Export
               </button>
               <button
+                onClick={async () => {
+                  setShowMoreMenu(false);
+                  const newVal = !project.is_template;
+                  await setProjectTemplate(projectId, newVal);
+                  setProject((p) => p ? { ...p, is_template: newVal } : p);
+                  showToast(newVal ? "Project saved as template" : "Template removed", "success");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {project.is_template ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                  )}
+                </svg>
+                {project.is_template ? "Remove as template" : "Make as template"}
+              </button>
+              <button
                 onClick={() => { setShowMoreMenu(false); handleDelete(); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors"
               >
@@ -430,13 +488,13 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
             {/* Thumbnail */}
             <div
               onClick={project.thumbnail_path ? () => setThumbnailPreview(true) : undefined}
-              className={`w-48 h-36 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 overflow-hidden flex items-center justify-center shrink-0 group relative ${project.thumbnail_path ? "cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors" : ""}`}
+              className={`w-44 h-44 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 overflow-hidden flex items-center justify-center shrink-0 group relative ${project.thumbnail_path ? "cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors" : ""}`}
             >
               {project.thumbnail_path ? (
                 <img
                   src={convertFileSrc(project.thumbnail_path) + "?v=" + thumbKey}
                   alt={project.name}
-                  className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+                  className="w-full h-full object-contain group-hover:opacity-80 transition-opacity"
                 />
               ) : (
                 <div className="text-center text-gray-400 dark:text-gray-500">
@@ -709,7 +767,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                               .filter(pf => pf.curated_filament_id)
                               .map(pf => pf.curated_filament_id!)
                           )}
-                          className="text-[10px] px-1.5 py-0.5 rounded border border-indigo-300 dark:border-indigo-600 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer transition-colors"
+                          className="text-[10px] h-5 px-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors"
                         >
                           Filter all
                         </button>
@@ -730,7 +788,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                                 pf.match_status === "unmatched"
                                   ? "border-2 border-gray-400 dark:border-gray-500"
                                   : pf.match_status === "guessed"
-                                    ? "border-2 border-dashed border-gray-300 dark:border-gray-500"
+                                    ? "border-2 border-solid border-gray-300 dark:border-gray-500"
                                     : "border border-gray-300 dark:border-gray-500"
                               }`}
                               style={{ backgroundColor: pf.match_status === "unmatched" ? (pf.parsed_color || "#9ca3af") : pf.color }}
@@ -880,7 +938,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                               if (e.key === "Escape") setFilamentSearch("");
                             }}
                             placeholder="Search to add filament..."
-                            className="w-full text-xs px-2 py-1.5 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+                            className="w-full text-xs px-2 py-1.5 border border-solid border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
                           />
                           {filamentSearch.length > 0 && (() => {
                             const q = filamentSearch.toLowerCase();
@@ -932,7 +990,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                                 pf.match_status === "unmatched"
                                   ? "border-2 border-gray-400 dark:border-gray-500"
                                   : pf.match_status === "guessed"
-                                    ? "border-2 border-dashed border-gray-300 dark:border-gray-500"
+                                    ? "border-2 border-solid border-gray-300 dark:border-gray-500"
                                     : "border border-gray-300 dark:border-gray-500"
                               }`}
                               style={{ backgroundColor: pf.match_status === "unmatched" ? (pf.parsed_color || "#9ca3af") : pf.color }}
@@ -1142,7 +1200,9 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                   />
                 ) : project.description ? (
                   <div className="prose prose-sm dark:prose-invert max-w-none text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-xs [&_h3]:font-bold [&_p]:text-xs [&_li]:text-xs [&_ul]:my-1 [&_ol]:my-1 [&_p]:my-1 [&_h1]:my-1 [&_h2]:my-1 [&_h3]:my-1">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{project.description}</ReactMarkdown>
+                    <Suspense fallback={<span className="text-sm text-gray-500">{project.description}</span>}>
+                      <MarkdownRenderer>{project.description}</MarkdownRenderer>
+                    </Suspense>
                   </div>
                 ) : null
               )}
@@ -1154,7 +1214,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
             <FileList
               files={files}
               projectId={projectId}
-              onRefresh={loadProject}
+              onRefresh={loadProjectData}
               openPreviewFileId={previewFileId}
               onPreviewChange={setPreviewFileId}
               onSetThumbnail={async (filePath) => {
@@ -1162,7 +1222,7 @@ export default function ProjectDetail({ projectId, onBack, onDeleted, onDuplicat
                 try {
                   await setProjectThumbnail(projectId, filePath);
                   setThumbKey((k) => k + 1);
-                  await loadProject();
+                  await loadProjectData();
                 } finally {
                   setSettingThumbnail(false);
                 }

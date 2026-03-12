@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, createProject, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch, importProject, openFileWithApp } from "./lib/api";
+import { listProjects, createProject, createFromTemplate, importFiles, listFolderFiles, toggleFileFavorite, setProjectThumbnail, setProjectTags, addProjectToCollection, isFirstLaunch, importProject, openFileWithApp } from "./lib/api";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectSummary, SortBy, SortOrder, ViewMode } from "./lib/types";
 import Sidebar from "./components/Sidebar";
@@ -44,7 +44,10 @@ function App() {
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [allOwned, setAllOwned] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
   const navHistoryRef = useRef<string[]>([]); // stack of previous project IDs
   const navForwardRef = useRef<string[]>([]); // stack of forward project IDs
   const [sidebarRefreshKey, setSidebarRefreshKey] = useState(0);
@@ -76,9 +79,10 @@ function App() {
       all_owned: (ownedOnly && allOwned) || undefined,
       sort_by: sortBy,
       sort_order: sortOrder,
+      is_template: showTemplates || undefined,
     });
     setProjects(result);
-  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, ownedOnly, allOwned, sortBy, sortOrder]);
+  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, ownedOnly, allOwned, sortBy, sortOrder, showTemplates]);
 
   // Check first launch
   useEffect(() => {
@@ -154,6 +158,19 @@ function App() {
     }
   }
 
+  async function handleCreateFromTemplate(templateId: string, name: string, description: string) {
+    setImporting(true);
+    try {
+      const project = await createFromTemplate(templateId, name, description || undefined);
+      setShowCreate(false);
+      navigateTo(project.id);
+    } catch (e) {
+      showToast(`Failed to create from template: ${e}`, "error");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function showToast(message: string, type: "success" | "error") {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ message, type });
@@ -184,16 +201,16 @@ function App() {
     }
   }
 
-  function navigateTo(projectId: string | null) {
+  const navigateTo = useCallback(function navigateTo(projectId: string | null) {
     // Push current state onto history before navigating
-    navHistoryRef.current.push(activeProjectId ?? "__library__");
+    navHistoryRef.current.push(activeProjectIdRef.current ?? "__library__");
     navForwardRef.current = []; // clear forward on new navigation
     setActiveProjectId(projectId);
     if (!projectId) {
       setSidebarRefreshKey((k) => k + 1);
       loadProjects();
     }
-  }
+  }, [loadProjects]);
 
   function navigateBack() {
     if (navHistoryRef.current.length === 0) {
@@ -229,15 +246,25 @@ function App() {
     }
   }
 
-  // Mouse back/forward buttons (3=back, 4=forward)
+  // Keep stable refs for functions used in callbacks with empty dependency arrays
+  const navigateBackRef = useRef(navigateBack);
+  navigateBackRef.current = navigateBack;
+  const navigateForwardRef = useRef(navigateForward);
+  navigateForwardRef.current = navigateForward;
+  const handleCreateRef = useRef(handleCreate);
+  handleCreateRef.current = handleCreate;
+  const handleImportProjectRef = useRef(handleImportProject);
+  handleImportProjectRef.current = handleImportProject;
+
+  // Mouse back/forward buttons (3=back, 4=forward) — registered once
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
-      if (e.button === 3) { e.preventDefault(); navigateBack(); }
-      if (e.button === 4) { e.preventDefault(); navigateForward(); }
+      if (e.button === 3) { e.preventDefault(); navigateBackRef.current(); }
+      if (e.button === 4) { e.preventDefault(); navigateForwardRef.current(); }
     }
     window.addEventListener("mousedown", onMouseDown);
     return () => window.removeEventListener("mousedown", onMouseDown);
-  }); // intentionally no deps — reads mutable refs
+  }, []); // register once, uses refs for current function references
 
   function handleBack() {
     navigateTo(null);
@@ -272,16 +299,16 @@ function App() {
 
   // Handle folder drop to create project(s) or import .hllmproject files
   const handleFolderDrop = useCallback(async (paths: string[]) => {
-    if (activeProjectId) return; // Only on library view
+    if (activeProjectIdRef.current) return; // Only on library view
     for (const droppedPath of paths) {
       if (droppedPath.toLowerCase().endsWith(".hllmproject")) {
-        await handleImportProject(droppedPath);
+        await handleImportProjectRef.current(droppedPath);
       } else {
         const folderName = droppedPath.split(/[/\\]/).pop() || "Untitled";
-        await handleCreate(folderName, "", droppedPath, false);
+        await handleCreateRef.current(folderName, "", droppedPath, false);
       }
     }
-  }, [activeProjectId]);
+  }, []);
 
   const { isDragging } = useFileDrop(handleFolderDrop);
 
@@ -384,6 +411,8 @@ function App() {
         onOwnedOnlyChange={setOwnedOnly}
         allOwned={allOwned}
         onAllOwnedChange={setAllOwned}
+        showTemplates={showTemplates}
+        onShowTemplatesChange={setShowTemplates}
         selectedSize={selectedSize}
         onSizeChange={setSelectedSize}
         excludedSizes={excludedSizes}
@@ -402,6 +431,7 @@ function App() {
           setAllOwned(false);
           setSelectedSize(undefined);
           setExcludedSizes([]);
+          setShowTemplates(false);
         }}
       />
 
@@ -422,14 +452,16 @@ function App() {
           onOpenSettings={() => setShowSettings(true)}
         />
 
-        <BulkActions
-          selectedIds={selectedProjectIds}
-          onClear={() => setSelectedProjectIds([])}
-          onRefresh={() => {
-            loadProjects();
-            setSidebarRefreshKey((k) => k + 1);
-          }}
-        />
+        {selectedProjectIds.length > 0 && (
+          <BulkActions
+            selectedIds={selectedProjectIds}
+            onClear={() => setSelectedProjectIds([])}
+            onRefresh={() => {
+              loadProjects();
+              setSidebarRefreshKey((k) => k + 1);
+            }}
+          />
+        )}
 
         {viewMode === "grid" ? (
           <ProjectGrid
@@ -455,13 +487,24 @@ function App() {
 
         {/* Drop overlay */}
         {isDragging && !activeProjectId && (
-          <div className="absolute inset-0 bg-indigo-500/10 border-2 border-dashed border-indigo-400 rounded-lg flex items-center justify-center z-40 pointer-events-none">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl px-8 py-6 text-center">
-              <svg className="w-12 h-12 mx-auto text-indigo-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
-              <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">Drop to import</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Drop a folder or .hllmproject file</p>
+          <div className="absolute inset-0 z-40 pointer-events-none flex flex-col">
+            <div className="flex-1 bg-indigo-500/10 border-2 border-solid border-indigo-400 rounded-t-lg flex items-center justify-center">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl px-8 py-6 text-center">
+                <svg className="w-12 h-12 mx-auto text-indigo-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <p className="text-lg font-semibold text-indigo-600 dark:text-indigo-400">Drop to import</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Drop a folder or .hllmproject file</p>
+              </div>
+            </div>
+            <div className="h-px bg-gray-900 dark:bg-gray-100" />
+            <div className="h-[20%] shrink-0 bg-red-500/25 border-2 border-solid border-red-400 rounded-b-lg flex items-center justify-center">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl px-6 py-3 text-center">
+                <svg className="w-8 h-8 mx-auto text-red-500 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                <p className="text-sm font-semibold text-red-600 dark:text-red-400">Drop here to cancel</p>
+              </div>
             </div>
           </div>
         )}
@@ -485,6 +528,7 @@ function App() {
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreate={handleCreate}
+        onCreateFromTemplate={handleCreateFromTemplate}
         onImportProject={() => handleImportProject()}
         loading={importing}
       />

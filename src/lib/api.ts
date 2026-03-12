@@ -38,6 +38,14 @@ export async function listProjects(filters: ListProjectsRequest = {}): Promise<P
   return invoke("list_projects", { req: filters });
 }
 
+export async function setProjectTemplate(id: string, isTemplate: boolean): Promise<void> {
+  return invoke("set_project_template", { id, isTemplate });
+}
+
+export async function createFromTemplate(templateId: string, name: string, description?: string): Promise<Project> {
+  return invoke("create_from_template", { templateId, name, description });
+}
+
 export async function setProjectThumbnail(projectId: string, sourcePath: string): Promise<string> {
   return invoke("set_project_thumbnail", { projectId, sourcePath });
 }
@@ -114,14 +122,6 @@ export async function getProjectFilamentsV2(projectId: string): Promise<ProjectF
 
 export async function matchProjectFilament(projectFilamentId: string, curatedFilamentId: string): Promise<void> {
   return invoke("match_project_filament", { req: { project_filament_id: projectFilamentId, curated_filament_id: curatedFilamentId } });
-}
-
-export async function unmatchProjectFilament(projectFilamentId: string): Promise<void> {
-  return invoke("unmatch_project_filament", { projectFilamentId });
-}
-
-export async function rematchAllProjectFilaments(projectId: string): Promise<void> {
-  return invoke("rematch_all_project_filaments", { projectId });
 }
 
 export async function rematchUnmatchedFilaments(): Promise<number> {
@@ -206,10 +206,6 @@ export async function toggleFileFavorite(fileId: string): Promise<boolean> {
   return invoke("toggle_file_favorite", { fileId });
 }
 
-export async function openFileInDefaultApp(path: string): Promise<void> {
-  return invoke("open_file_in_default_app", { path });
-}
-
 export async function openFileWithApp(path: string, app: string): Promise<void> {
   return invoke("open_file_with_app", { path, app });
 }
@@ -228,20 +224,12 @@ export async function syncProjectFiles(projectId: string): Promise<{ added: numb
 
 // ── Data Management ──
 
-export async function exportData(): Promise<string> {
-  return invoke("export_data");
-}
-
 export async function exportProject(projectId: string, destPath: string): Promise<void> {
   return invoke("export_project", { projectId, destPath });
 }
 
 export async function importProject(filePath: string): Promise<Project> {
   return invoke("import_project", { filePath });
-}
-
-export async function getDataDir(): Promise<string> {
-  return invoke("get_data_dir");
 }
 
 // ── Library Path ──
@@ -252,14 +240,6 @@ export async function isFirstLaunch(): Promise<boolean> {
 
 export async function setupLibrary(path?: string): Promise<void> {
   return invoke("setup_library", { path: path ?? null });
-}
-
-export async function getLibraryPath(): Promise<string> {
-  return invoke("get_library_path");
-}
-
-export async function setLibraryPath(path: string, moveData: boolean): Promise<void> {
-  return invoke("set_library_path", { path, moveData });
 }
 
 export async function getLibraries(): Promise<{ libraries: { name: string; path: string }[]; active_index: number }> {
@@ -280,6 +260,10 @@ export async function switchLibrary(index: number): Promise<void> {
 
 export async function renameLibrary(index: number, name: string): Promise<void> {
   return invoke("rename_library", { index, name });
+}
+
+export async function getDragIcon(): Promise<string> {
+  return invoke("get_drag_icon");
 }
 
 export async function getStorageSizes(): Promise<{ projects_size: number; deleted_size: number }> {

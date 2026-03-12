@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { listTags, listCollections, listUsedCuratedFilaments, listAllSizes } from "../lib/api";
 import type { TagWithCount, Collection, CuratedFilamentWithCount } from "../lib/types";
 import TagManager from "./TagManager";
@@ -42,6 +42,8 @@ interface SidebarProps {
   onOwnedOnlyChange: (v: boolean) => void;
   allOwned: boolean;
   onAllOwnedChange: (v: boolean) => void;
+  showTemplates: boolean;
+  onShowTemplatesChange: (v: boolean) => void;
   refreshKey?: number;
   hasSearch?: boolean;
   onClearAll?: () => void;
@@ -68,6 +70,8 @@ export default function Sidebar({
   onOwnedOnlyChange,
   allOwned,
   onAllOwnedChange,
+  showTemplates,
+  onShowTemplatesChange,
   refreshKey,
   hasSearch,
   onClearAll,
@@ -202,15 +206,16 @@ export default function Sidebar({
     onAllOwnedChange(false);
     onSizeChange(undefined);
     onExcludedSizesChange([]);
+    onShowTemplatesChange(false);
   }
 
   // Filter the curated filaments shown in sidebar by owned toggle and search
-  const displayFilaments = filaments.filter(f => {
+  const displayFilaments = useMemo(() => filaments.filter(f => {
     if (ownedOnly && !f.owned) return false;
     if (!filamentSearch) return true;
     const q = filamentSearch.toLowerCase();
     return f.brand.toLowerCase().includes(q) || f.name.toLowerCase().includes(q) || f.line.toLowerCase().includes(q);
-  });
+  }), [filaments, ownedOnly, filamentSearch]);
 
   const hasFilters =
     hasSearch ||
@@ -222,7 +227,8 @@ export default function Sidebar({
     selectedSize !== undefined ||
     excludedSizes.length > 0 ||
     ownedOnly ||
-    allOwned;
+    allOwned ||
+    showTemplates;
 
   return (
     <>
@@ -520,6 +526,23 @@ export default function Sidebar({
             )}
           </div>
         )}
+
+        {/* Templates toggle */}
+        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+          <button
+            onClick={() => onShowTemplatesChange(!showTemplates)}
+            className={`w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded cursor-pointer transition-colors ${
+              showTemplates
+                ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium"
+                : "text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800"
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+            </svg>
+            Show templates
+          </button>
+        </div>
 
         </div>
 

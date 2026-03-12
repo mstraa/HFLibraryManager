@@ -19,6 +19,11 @@ export function useFileDrop(onDrop: (paths: string[]) => void) {
           setIsDragging(false);
         } else if (event.payload.type === "drop") {
           setIsDragging(false);
+          // Ignore drops in the bottom 20% of the window (cancel zone)
+          const pos = (event.payload as { position?: { x: number; y: number } }).position;
+          if (pos && pos.y > window.innerHeight * 0.8) {
+            return;
+          }
           if (event.payload.paths && event.payload.paths.length > 0) {
             stableOnDrop(event.payload.paths);
           }

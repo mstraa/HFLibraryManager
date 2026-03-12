@@ -56,6 +56,7 @@ function ProjectCard({
           <img
             src={convertFileSrc(project.thumbnail_path) + "?v=" + encodeURIComponent(project.updated_at)}
             alt={project.name}
+            loading="lazy"
             className={`group-hover:scale-105 transition-transform duration-300 ${
               thumbnailMode === "full"
                 ? "object-scale-down"
@@ -74,6 +75,13 @@ function ProjectCard({
                 d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
               />
             </svg>
+          </div>
+        )}
+
+        {/* Template badge overlay */}
+        {project.is_template && !selectionMode && (
+          <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[10px] font-semibold uppercase tracking-wide">
+            Template
           </div>
         )}
 

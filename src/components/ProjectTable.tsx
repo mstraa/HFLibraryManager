@@ -128,6 +128,7 @@ export default function ProjectTable({
                       <img
                         src={convertFileSrc(project.thumbnail_path) + "?v=" + encodeURIComponent(project.updated_at)}
                         alt={project.name}
+                        loading="lazy"
                         className="w-full h-full object-cover"
                       />
                     ) : (

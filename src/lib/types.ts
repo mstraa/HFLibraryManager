@@ -10,6 +10,7 @@ export interface Project {
   print_width_mm: number | null;
   print_height_mm: number | null;
   print_time_mins: number | null;
+  is_template: boolean;
 }
 
 export interface ProjectSummary {
@@ -23,6 +24,7 @@ export interface ProjectSummary {
   filaments: ProjectFilamentDisplay[];
   size: string | null;
   starred_3mf_path: string | null;
+  is_template: boolean;
 }
 
 export interface Tag {
@@ -134,4 +136,5 @@ export interface ListProjectsRequest {
   all_owned?: boolean;
   sort_by?: SortBy;
   sort_order?: SortOrder;
+  is_template?: boolean;
 }

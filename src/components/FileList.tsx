@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import {
   importFiles,
   deleteFile,
@@ -10,6 +11,7 @@ import {
   readTextFile,
   syncProjectFiles,
   openFileWithApp,
+  getDragIcon,
 } from "../lib/api";
 import type { ProjectFile } from "../lib/types";
 import { formatFileSize, formatDate } from "../lib/formatting";
@@ -30,7 +32,7 @@ type FileGroup = "design" | "hueforge" | "hueforge_export" | "print" | "other";
 const GROUP_CONFIG: Record<FileGroup, { label: string; color: string }> = {
   design: { label: "Design / Images", color: "#4a90d9" },
   hueforge: { label: "HueForge", color: "#e67e22" },
-  hueforge_export: { label: "HueForge Export", color: "#d4841a" },
+  hueforge_export: { label: "HueForge Export", color: "#c9a825" },
   print: { label: "3MF / Print", color: "#2ecc71" },
   other: { label: "Other", color: "#6b7280" },
 };
@@ -79,6 +81,12 @@ function PreviewPanel({ file, onClose }: { file: ProjectFile; onClose: () => voi
   const [textContent, setTextContent] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset stale content when file changes
+  useEffect(() => {
+    setTextContent(null);
+    setCopied(false);
+  }, [file.id]);
 
   useEffect(() => {
     if (isText && textContent === null) {
@@ -166,6 +174,14 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; path: string; icon?: string } | null>(null);
+  const didDragRef = useRef(false);
+  const defaultDragIconRef = useRef<string | null>(null);
+
+  // Load default drag icon once
+  useEffect(() => {
+    getDragIcon().then((p) => { defaultDragIconRef.current = p; }).catch(() => {});
+  }, []);
 
   // External preview control
   useEffect(() => {
@@ -210,8 +226,12 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
     [files, searchQuery]
   );
 
-  // Favorites from unfiltered list (for chips strip)
-  const allFavorites = useMemo(() => files.filter(f => f.favorited), [files]);
+  // Favorites from unfiltered list (for chips strip), sorted by reverse group order
+  const REVERSE_GROUP_ORDER: Record<FileGroup, number> = { print: 0, other: 1, hueforge_export: 2, hueforge: 3, design: 4 };
+  const allFavorites = useMemo(() =>
+    files.filter(f => f.favorited).sort((a, b) =>
+      REVERSE_GROUP_ORDER[getGroup(a.original_filename)] - REVERSE_GROUP_ORDER[getGroup(b.original_filename)]
+    ), [files]);
 
   // Group ALL filtered files into categories (favorites included in their natural group)
   const groups = useMemo(() => {
@@ -301,12 +321,39 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
     setContextMenu(null);
   }
 
+  function handleDragStart(e: React.MouseEvent, file: ProjectFile) {
+    if (e.button !== 0) return;
+    dragStartRef.current = { x: e.clientX, y: e.clientY, path: file.file_path, icon: file.thumbnail_path || undefined };
+    didDragRef.current = false;
+
+    function onMove(ev: MouseEvent) {
+      if (!dragStartRef.current) return;
+      if (Math.abs(ev.clientX - dragStartRef.current.x) > 5 || Math.abs(ev.clientY - dragStartRef.current.y) > 5) {
+        didDragRef.current = true;
+        const { path, icon } = dragStartRef.current;
+        dragStartRef.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        startDrag({ item: [path], icon: icon || defaultDragIconRef.current || path });
+      }
+    }
+
+    function onUp() {
+      dragStartRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
   // ── Render ──
 
   return (
     <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       {/* File list side */}
-      <div className={`flex flex-col ${previewFile ? "w-1/2" : "w-full"} transition-all`}>
+      <div className={`flex flex-col select-none min-w-0 ${previewFile ? "w-1/2" : "w-full"} transition-all`}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
@@ -394,27 +441,34 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
         {/* Favorites chips strip */}
         {allFavorites.length > 0 && !searchQuery && (
           <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800" style={{ backgroundColor: "rgba(251, 191, 36, 0.04)" }}>
-            <div className="flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-              <svg className="w-3 h-3 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <div className="flex items-center gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+              <svg className="w-4 h-4 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
               </svg>
               {allFavorites.map(f => {
                 const ext = getExt(f.original_filename);
+                const groupColor = GROUP_CONFIG[getGroup(f.original_filename)].color;
+                const isActive = previewFile?.id === f.id;
                 return (
                   <button
                     key={f.id}
-                    onClick={() => handleFileSelect(f)}
-                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] shrink-0 cursor-pointer transition-colors border ${
-                      previewFile?.id === f.id
-                        ? "bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700"
-                        : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 border-gray-200 dark:border-gray-700"
+                    onMouseDown={(e) => handleDragStart(e, f)}
+                    onClick={() => { if (didDragRef.current) { didDragRef.current = false; return; } handleFileSelect(f); }}
+                    className={`flex items-center gap-1.5 px-2 py-2 rounded-md text-[11px] shrink-0 cursor-pointer transition-colors border ${
+                      isActive
+                        ? "text-white"
+                        : "text-gray-700 dark:text-gray-300"
                     }`}
+                    style={{
+                      borderColor: groupColor,
+                      backgroundColor: isActive ? groupColor : groupColor + "15",
+                    }}
                     title={f.original_filename}
                   >
                     {f.thumbnail_path ? (
-                      <img src={convertFileSrc(f.thumbnail_path)} alt="" className="w-4 h-4 rounded object-cover shrink-0" />
+                      <img src={convertFileSrc(f.thumbnail_path)} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
                     ) : (
-                      <span className="text-[8px] font-bold uppercase text-gray-400 w-4 text-center shrink-0">{ext}</span>
+                      <span className="text-[9px] font-bold uppercase w-8 h-8 text-center shrink-0 flex items-center justify-center" style={{ color: groupColor }}>{ext}</span>
                     )}
                     <span className="truncate max-w-[100px]">{f.original_filename}</span>
                   </button>
@@ -485,7 +539,8 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
                                 : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
                             }`}
                             style={{ width: previewFile ? "calc(50% - 4px)" : "120px" }}
-                            onClick={() => canPreview ? handleFileSelect(file) : revealInFinder(file.file_path)}
+                            onMouseDown={(e) => handleDragStart(e, file)}
+                            onClick={() => { if (didDragRef.current) { didDragRef.current = false; return; } canPreview ? handleFileSelect(file) : revealInFinder(file.file_path); }}
                             onContextMenu={(e) => openContextMenu(file, e)}
                           >
                             {/* Thumbnail area */}
@@ -563,18 +618,10 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
                             ? "bg-indigo-50 dark:bg-indigo-900/20"
                             : "hover:bg-gray-50 dark:hover:bg-gray-800/50"
                         }`}
-                        onClick={() => canPreview ? handleFileSelect(file) : revealInFinder(file.file_path)}
+                        onMouseDown={(e) => handleDragStart(e, file)}
+                        onClick={() => { if (didDragRef.current) { didDragRef.current = false; return; } canPreview ? handleFileSelect(file) : revealInFinder(file.file_path); }}
                         onContextMenu={(e) => openContextMenu(file, e)}
                       >
-                        {/* Thumbnail / ext badge */}
-                        <div className="w-6 h-6 rounded flex items-center justify-center shrink-0 overflow-hidden bg-gray-100 dark:bg-gray-700">
-                          {file.thumbnail_path ? (
-                            <img src={convertFileSrc(file.thumbnail_path)} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-[8px] font-bold uppercase text-gray-500 dark:text-gray-400">{ext || "?"}</span>
-                          )}
-                        </div>
-
                         {/* Favorite star */}
                         <button
                           onClick={(e) => { e.stopPropagation(); handleToggleFavorite(file.id); }}
@@ -589,6 +636,15 @@ export default function FileList({ files, projectId, onRefresh, onSetThumbnail, 
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                           </svg>
                         </button>
+
+                        {/* Thumbnail / ext badge */}
+                        <div className="w-6 h-6 rounded flex items-center justify-center shrink-0 overflow-hidden bg-gray-100 dark:bg-gray-700">
+                          {file.thumbnail_path ? (
+                            <img src={convertFileSrc(file.thumbnail_path)} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[8px] font-bold uppercase text-gray-500 dark:text-gray-400">{ext || "?"}</span>
+                          )}
+                        </div>
 
                         {/* File info */}
                         <div className="flex-1 min-w-0">
