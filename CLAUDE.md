@@ -52,3 +52,4 @@ Before creating any release, always run the following checks and fix any issues 
 - Create a separate commit for each feature, bugfix, or task. Do not bundle unrelated changes.
 - Use conventional commit prefixes: `feat:`, `fix:`, `perf:`, `chore:`, `refactor:`, `docs:`.
 - Keep commit messages concise with a clear description of what changed and why.
+- **Never push to remote** unless the user explicitly asks. You may create commits freely, but only push when told to.
