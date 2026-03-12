@@ -3,11 +3,12 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 
 function HomepageHeader() {
   const {siteConfig} = useDocusaurusContext();
   return (
-    <header style={{padding: '4rem 0', textAlign: 'center'}}>
+    <header style={{padding: '4rem 0 2rem', textAlign: 'center'}}>
       <div className="container">
         <Heading as="h1" className="hero__title">
           {siteConfig.title}
@@ -26,6 +27,20 @@ function HomepageHeader() {
   );
 }
 
+function Screenshot({src, alt}: {src: string; alt: string}) {
+  const imgUrl = useBaseUrl(src);
+  return (
+    <div style={{
+      borderRadius: '8px',
+      overflow: 'hidden',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+      border: '1px solid rgba(255,255,255,0.1)',
+    }}>
+      <img src={imgUrl} alt={alt} style={{width: '100%', display: 'block'}} />
+    </div>
+  );
+}
+
 const features = [
   {
     title: 'Project Management',
@@ -33,7 +48,7 @@ const features = [
   },
   {
     title: 'Smart Filament Matching',
-    description: 'Curated filament library with fuzzy matching. Automatically parse filament data from 3MF metadata and match against your collection.',
+    description: 'Curated filament library with 800+ filaments and fuzzy matching. Automatically parse filament data from 3MF metadata and match against your collection.',
   },
   {
     title: 'Powerful Search & Filters',
@@ -47,7 +62,15 @@ export default function Home(): ReactNode {
     <Layout title="Home" description={siteConfig.tagline}>
       <HomepageHeader />
       <main>
-        <section style={{padding: '2rem 0 4rem'}}>
+        {/* Main screenshot */}
+        <section style={{padding: '1rem 0 3rem'}}>
+          <div className="container" style={{maxWidth: '900px'}}>
+            <Screenshot src="/img/screenshot-main.png" alt="HF Library Manager - Grid view with project cards" />
+          </div>
+        </section>
+
+        {/* Features */}
+        <section style={{padding: '2rem 0'}}>
           <div className="container">
             <div className="row">
               {features.map((f, i) => (
@@ -56,6 +79,29 @@ export default function Home(): ReactNode {
                   <p>{f.description}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Screenshot gallery */}
+        <section style={{padding: '2rem 0 4rem'}}>
+          <div className="container">
+            <Heading as="h2" style={{textAlign: 'center', marginBottom: '2rem'}}>
+              See it in action
+            </Heading>
+            <div className="row">
+              <div className="col col--6" style={{marginBottom: '1.5rem'}}>
+                <Screenshot src="/img/screenshot-project.png" alt="Project detail view with files, filaments, and metadata" />
+                <p style={{textAlign: 'center', marginTop: '0.75rem', fontSize: '0.9rem', opacity: 0.7}}>
+                  Project detail with files, filaments, and metadata
+                </p>
+              </div>
+              <div className="col col--6" style={{marginBottom: '1.5rem'}}>
+                <Screenshot src="/img/screenshot-filaments.png" alt="Filament library with search, filters, and ownership tracking" />
+                <p style={{textAlign: 'center', marginTop: '0.75rem', fontSize: '0.9rem', opacity: 0.7}}>
+                  Curated filament library with 800+ entries
+                </p>
+              </div>
             </div>
           </div>
         </section>
