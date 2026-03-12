@@ -10,6 +10,7 @@ import type { ThumbnailMode } from "../lib/types";
 interface SettingsProps {
   onBack: () => void;
   onLibraryChanged: () => void;
+  onOpenFilamentManager: () => void;
 }
 
 interface LibraryEntry {
@@ -17,7 +18,7 @@ interface LibraryEntry {
   path: string;
 }
 
-export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
+export default function Settings({ onBack, onLibraryChanged, onOpenFilamentManager }: SettingsProps) {
   const [libraries, setLibraries] = useState<LibraryEntry[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [editingName, setEditingName] = useState<number | null>(null);
@@ -364,27 +365,22 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
               Manage project filament data and curated filament matching.
             </p>
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
+            <div className="space-y-3">
+              {/* Filament Library */}
+              <div>
                 <button
-                  onClick={async () => {
-                    setRematchingFilaments(true);
-                    setRematchResult(null);
-                    try {
-                      const count = await rematchUnmatchedFilaments();
-                      setRematchResult(count);
-                    } finally {
-                      setRematchingFilaments(false);
-                    }
-                  }}
-                  disabled={rematchingFilaments}
-                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors disabled:opacity-50"
+                  onClick={onOpenFilamentManager}
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 cursor-pointer transition-colors"
                 >
-                  <svg className={`w-4 h-4 ${rematchingFilaments ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
                   </svg>
-                  {rematchingFilaments ? "Matching..." : "Rematch Unmatched"}
+                  Filament Library
                 </button>
+              </div>
+
+              {/* Reparse & Rematch */}
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={async () => {
                     setReparsingFilaments(true);
@@ -404,6 +400,29 @@ export default function Settings({ onBack, onLibraryChanged }: SettingsProps) {
                   </svg>
                   {reparsingFilaments ? "Reparsing..." : "Reparse All"}
                 </button>
+                <button
+                  onClick={async () => {
+                    setRematchingFilaments(true);
+                    setRematchResult(null);
+                    try {
+                      const count = await rematchUnmatchedFilaments();
+                      setRematchResult(count);
+                    } finally {
+                      setRematchingFilaments(false);
+                    }
+                  }}
+                  disabled={rematchingFilaments}
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <svg className={`w-4 h-4 ${rematchingFilaments ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  {rematchingFilaments ? "Matching..." : "Rematch Unmatched"}
+                </button>
+              </div>
+
+              {/* Reset & Clear */}
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setShowResetFilamentsConfirm(true)}
                   className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 cursor-pointer transition-colors"

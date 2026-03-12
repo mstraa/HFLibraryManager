@@ -346,7 +346,10 @@ function App() {
 
   // Settings view
   if (showSettings) {
-    return <Settings onBack={() => setShowSettings(false)} onLibraryChanged={() => {
+    return <Settings onBack={() => setShowSettings(false)} onOpenFilamentManager={() => {
+      setShowSettings(false);
+      setShowFilamentManager(true);
+    }} onLibraryChanged={() => {
       // Reset all filters and navigation state when library changes
       setSearch("");
       setSelectedTags([]);
@@ -448,7 +451,6 @@ function App() {
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           onCreateProject={() => setShowCreate(true)}
-          onOpenFilamentManager={() => setShowFilamentManager(true)}
           onOpenSettings={() => setShowSettings(true)}
         />
 
