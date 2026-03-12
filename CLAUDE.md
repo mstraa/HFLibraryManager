@@ -43,8 +43,9 @@ Before creating any release, always run the following checks and fix any issues 
 ## Documentation
 
 - Keep `README.md` up to date when adding features, changing setup steps, or modifying the tech stack.
-- Keep the project documentation (in `docs/`) up to date when changing user-facing behavior, adding new features, or modifying architecture.
+- Keep the documentation site (`docs/docs/`) up to date when changing user-facing behavior, adding new features, or modifying architecture. The site is built with Docusaurus and deployed to GitHub Pages.
 - Documentation updates should be included in the same commit as the code change they describe.
+- To preview docs locally: `cd docs && npm start`
 
 ## Commit Discipline
 
