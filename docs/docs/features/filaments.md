@@ -15,7 +15,7 @@ A global filament database shared across all libraries containing:
 - **Color** — Color name and hex value
 - **Transmission Distance (TD)** — For HueForge compatibility
 
-The library comes pre-loaded with a default set of filaments and can be expanded via JSON import.
+The library comes pre-loaded with a default set of filaments and can be expanded by importing JSON files from [HueForge](https://shop.thehueforge.com/) or [3D Filament Profiles](https://3dfilamentprofiles.com/).
 
 ## Ownership Tracking
 
@@ -48,5 +48,5 @@ When you import 3MF files, HF Library Manager automatically:
 
 - **Rematch all** — Re-run matching for all unmatched filaments across projects
 - **Reset matches** — Clear all matches and start fresh
-- **Import filaments** — Load filament data from JSON files
+- **Import filaments** — Load filament data from JSON files exported from [HueForge](https://shop.thehueforge.com/) or [3D Filament Profiles](https://3dfilamentprofiles.com/)
 - **Reset to defaults** — Restore the built-in filament library
