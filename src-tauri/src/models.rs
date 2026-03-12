@@ -25,6 +25,7 @@ pub struct Project {
     pub print_width_mm: Option<f64>,
     pub print_height_mm: Option<f64>,
     pub print_time_mins: Option<i64>,
+    pub is_template: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +40,7 @@ pub struct ProjectSummary {
     pub filaments: Vec<ProjectFilamentDisplay>,
     pub size: Option<String>,
     pub starred_3mf_path: Option<String>,
+    pub is_template: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -244,6 +246,7 @@ pub struct ListProjectsRequest {
     pub all_owned: Option<bool>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
+    pub is_template: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

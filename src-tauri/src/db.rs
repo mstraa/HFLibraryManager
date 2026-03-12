@@ -10,6 +10,23 @@ use uuid::Uuid;
 
 const DEFAULT_FILAMENTS_JSON: &str = include_str!("../resources/default_filaments.json");
 
+/// Lightweight struct for in-memory filament matching (avoids repeated DB queries).
+#[allow(dead_code)]
+pub(crate) struct CuratedFilamentRow {
+    id: String,
+    brand: String,
+    line: String,
+    name: String,
+    material: String,
+    color: String,
+    // Pre-computed lowercase fields to avoid repeated .to_lowercase() in matching loops
+    brand_lower: String,
+    line_lower: String,
+    name_lower: String,
+    full_brand_lower: String,   // "{brand} {line}" lowercased
+    brand_norm: String,          // brand+line lowered, no spaces/hyphens
+}
+
 pub struct Database {
     conn: Mutex<Option<Connection>>,
 }
@@ -110,6 +127,7 @@ impl Database {
 
         let now = Utc::now().to_rfc3339();
         let mut count = 0;
+        conn.execute_batch("BEGIN").ok();
         for item in arr {
             let material = item.get("Type").and_then(|v| v.as_str())
                 .or_else(|| item.get("Material").and_then(|v| v.as_str()))
@@ -139,6 +157,7 @@ impl Database {
                 count += 1;
             }
         }
+        conn.execute_batch("COMMIT").ok();
         eprintln!("Seeded {} default filaments", count);
     }
 
@@ -555,6 +574,12 @@ impl Database {
             conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         }
 
+        // Migration: add is_template column to projects
+        let has_is_template = conn.prepare("SELECT is_template FROM projects LIMIT 0").is_ok();
+        if !has_is_template {
+            conn.execute("ALTER TABLE projects ADD COLUMN is_template INTEGER NOT NULL DEFAULT 0", []).ok();
+        }
+
         // Performance indexes
         conn.execute_batch(
             "
@@ -564,6 +589,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_files_project_id ON files(project_id);
             CREATE INDEX IF NOT EXISTS idx_files_favorited ON files(favorited);
             CREATE INDEX IF NOT EXISTS idx_project_filaments_project_id ON project_filaments(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_filaments_curated ON project_filaments(curated_filament_id);
             CREATE INDEX IF NOT EXISTS idx_project_tags_project_id ON project_tags(project_id);
             CREATE INDEX IF NOT EXISTS idx_project_tags_tag_id ON project_tags(tag_id);
             CREATE INDEX IF NOT EXISTS idx_project_collections_project_id ON project_collections(project_id);
@@ -686,7 +712,40 @@ impl Database {
         Ok(())
     }
 
+    /// Load all curated filaments with pre-computed lowercase fields for efficient matching.
+    pub(crate) fn load_curated_filaments(conn: &Connection) -> Result<Vec<CuratedFilamentRow>> {
+        let mut cf_stmt = conn.prepare(
+            "SELECT id, brand, line, name, material, color FROM shared.curated_filaments"
+        )?;
+        let curated: Vec<CuratedFilamentRow> = cf_stmt.query_map([], |row| {
+            let brand: String = row.get(1)?;
+            let line: String = row.get(2)?;
+            let name: String = row.get(3)?;
+            let brand_lower = brand.to_lowercase();
+            let line_lower = line.to_lowercase();
+            let name_lower = name.to_lowercase();
+            let full_brand_lower = format!("{} {}", brand_lower, line_lower);
+            let brand_norm = format!("{}{}", brand, line).to_lowercase().replace([' ', '-', '_'], "");
+            Ok(CuratedFilamentRow {
+                id: row.get(0)?,
+                brand,
+                line,
+                name,
+                material: row.get(4)?,
+                color: row.get(5)?,
+                brand_lower,
+                line_lower,
+                name_lower,
+                full_brand_lower,
+                brand_norm,
+            })
+        })?.filter_map(|r| r.ok()).collect();
+        Ok(curated)
+    }
+
     pub fn run_matching_all(conn: &Connection) -> Result<()> {
+        let curated = Self::load_curated_filaments(conn)?;
+
         // Get all unmatched project_filaments
         let mut stmt = conn.prepare(
             "SELECT pf.id, pf.parsed_color, pf.parsed_brand, pf.parsed_name FROM project_filaments pf WHERE pf.match_status = 'unmatched'"
@@ -696,7 +755,7 @@ impl Database {
         })?.filter_map(|r| r.ok()).collect();
 
         for (pf_id, parsed_color, parsed_brand, parsed_name) in &unmatched {
-            if let Some((curated_id, status)) = Self::find_match(conn, parsed_color, parsed_brand, parsed_name)? {
+            if let Some((curated_id, status)) = Self::find_match_in_memory(&curated, parsed_color, parsed_brand, parsed_name) {
                 conn.execute(
                     "UPDATE project_filaments SET curated_filament_id = ?1, match_status = ?2 WHERE id = ?3",
                     rusqlite::params![curated_id, status, pf_id],
@@ -766,8 +825,19 @@ impl Database {
     }
 
     /// Find a matching curated filament. Returns (curated_id, match_status).
+    /// This version queries the DB and is used for single-filament matching.
     pub fn find_match(conn: &Connection, parsed_color: &str, parsed_brand: &str, parsed_name: &str) -> Result<Option<(String, String)>> {
+        // Load all curated filaments and delegate to in-memory matcher
+        let curated = Self::load_curated_filaments(conn)?;
+        Ok(Self::find_match_in_memory(&curated, parsed_color, parsed_brand, parsed_name))
+    }
+
+    /// Find a matching curated filament from a pre-loaded slice. Returns (curated_id, match_status).
+    /// Used by `run_matching_all` to avoid repeated DB queries.
+    pub(crate) fn find_match_in_memory(curated: &[CuratedFilamentRow], parsed_color: &str, parsed_brand: &str, parsed_name: &str) -> Option<(String, String)> {
         let (brand_part, _line_part) = Self::split_brand_line(parsed_brand);
+        let brand_part_lower = brand_part.to_lowercase();
+        let parsed_brand_lower = parsed_brand.to_lowercase();
 
         // Build candidate name variants: original + stripped of known material prefix
         let name_no_material = Self::strip_any_material_prefix(parsed_name);
@@ -779,57 +849,41 @@ impl Database {
 
         // 1. Exact match: brand matches AND name matches exactly
         for name_var in &name_variants {
-            let exact: Option<String> = conn.query_row(
-                "SELECT id FROM shared.curated_filaments
-                 WHERE LOWER(brand) = LOWER(?1) AND LOWER(name) = LOWER(?2)
-                 LIMIT 1",
-                rusqlite::params![brand_part, name_var],
-                |row| row.get(0),
-            ).ok();
-            if let Some(id) = exact {
-                return Ok(Some((id, "exact".to_string())));
+            let name_var_lower = name_var.to_lowercase();
+
+            for c in curated {
+                if c.brand_lower == brand_part_lower && c.name_lower == name_var_lower {
+                    return Some((c.id.clone(), "exact".to_string()));
+                }
             }
 
             // Also try with concatenated brand+line matching parsed_brand
-            let exact2: Option<String> = conn.query_row(
-                "SELECT id FROM shared.curated_filaments
-                 WHERE LOWER(brand || ' ' || line) = LOWER(?1) AND LOWER(name) = LOWER(?2)
-                 LIMIT 1",
-                rusqlite::params![parsed_brand, name_var],
-                |row| row.get(0),
-            ).ok();
-            if let Some(id) = exact2 {
-                return Ok(Some((id, "exact".to_string())));
+            for c in curated {
+                if c.full_brand_lower == parsed_brand_lower && c.name_lower == name_var_lower {
+                    return Some((c.id.clone(), "exact".to_string()));
+                }
             }
         }
 
         // 2. Fuzzy match: normalize brands, check name similarity
         let normalized_brand = parsed_brand.to_lowercase().replace([' ', '-', '_'], "");
-        let mut fuzzy_stmt = conn.prepare(
-            "SELECT id, brand, line, name, material FROM shared.curated_filaments"
-        )?;
-        let candidates: Vec<(String, String, String, String, String)> = fuzzy_stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?))
-        })?.filter_map(|r| r.ok()).collect();
 
-        for (cid, cbrand, cline, cname, cmaterial) in &candidates {
-            let curated_brand_norm = format!("{}{}", cbrand, cline).to_lowercase().replace([' ', '-', '_'], "");
-            if curated_brand_norm == normalized_brand || cbrand.to_lowercase() == brand_part.to_lowercase() {
+        for c in curated {
+            if c.brand_norm == normalized_brand || c.brand_lower == brand_part_lower {
                 // Try matching with progressively stripped parsed name
-                let stripped = Self::strip_name_prefixes(parsed_name, cbrand, cline, cmaterial);
+                let stripped = Self::strip_name_prefixes(parsed_name, &c.brand, &c.line, &c.material);
                 let names_to_try = [parsed_name.to_string(), name_no_material.clone(), stripped];
 
                 for pn in &names_to_try {
                     let pn_lower = pn.to_lowercase();
-                    let cn_lower = cname.to_lowercase();
-                    if pn_lower == cn_lower {
-                        return Ok(Some((cid.clone(), "exact".to_string())));
+                    if pn_lower == c.name_lower {
+                        return Some((c.id.clone(), "exact".to_string()));
                     }
-                    if pn_lower.contains(&cn_lower) || cn_lower.contains(&pn_lower) {
-                        return Ok(Some((cid.clone(), "guessed".to_string())));
+                    if pn_lower.contains(&c.name_lower) || c.name_lower.contains(&pn_lower) {
+                        return Some((c.id.clone(), "guessed".to_string()));
                     }
-                    if Self::edit_distance(&pn_lower, &cn_lower) <= 2 {
-                        return Ok(Some((cid.clone(), "guessed".to_string())));
+                    if Self::edit_distance(&pn_lower, &c.name_lower, 2) <= 2 {
+                        return Some((c.id.clone(), "guessed".to_string()));
                     }
                 }
             }
@@ -838,29 +892,23 @@ impl Database {
         // 3. Color fallback: same brand, close color
         if parsed_color.starts_with('#') && parsed_color.len() == 7 {
             if let Some(parsed_rgb) = Self::hex_to_rgb(parsed_color) {
-                for (cid, cbrand, cline, _cname, _cmaterial) in &candidates {
-                    let curated_full_norm = format!("{}{}", cbrand, cline).to_lowercase().replace([' ', '-', '_'], "");
-                    let curated_brand_norm = cbrand.to_lowercase().replace([' ', '-', '_'], "");
-                    let brand_part_norm = brand_part.to_lowercase().replace([' ', '-', '_'], "");
-                    if curated_brand_norm != brand_part_norm && curated_full_norm != normalized_brand && curated_brand_norm != normalized_brand {
+                let brand_part_norm = brand_part.to_lowercase().replace([' ', '-', '_'], "");
+                for c in curated {
+                    let curated_brand_norm_simple = c.brand_lower.replace([' ', '-', '_'], "");
+                    if curated_brand_norm_simple != brand_part_norm && c.brand_norm != normalized_brand && curated_brand_norm_simple != normalized_brand {
                         continue;
                     }
-                    let ccolor: String = conn.query_row(
-                        "SELECT color FROM shared.curated_filaments WHERE id = ?1",
-                        rusqlite::params![cid],
-                        |row| row.get(0),
-                    ).unwrap_or_default();
-                    if let Some(curated_rgb) = Self::hex_to_rgb(&ccolor) {
+                    if let Some(curated_rgb) = Self::hex_to_rgb(&c.color) {
                         let dist = Self::color_distance(&parsed_rgb, &curated_rgb);
                         if dist < 30.0 {
-                            return Ok(Some((cid.clone(), "guessed".to_string())));
+                            return Some((c.id.clone(), "guessed".to_string()));
                         }
                     }
                 }
             }
         }
 
-        Ok(None)
+        None
     }
 
     fn hex_to_rgb(hex: &str) -> Option<(f64, f64, f64)> {
@@ -875,22 +923,27 @@ impl Database {
         ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt()
     }
 
-    fn edit_distance(a: &str, b: &str) -> usize {
-        let a_chars: Vec<char> = a.chars().collect();
-        let b_chars: Vec<char> = b.chars().collect();
-        let m = a_chars.len();
-        let n = b_chars.len();
+    fn edit_distance(a: &str, b: &str, max_dist: usize) -> usize {
+        let a: Vec<char> = a.chars().collect();
+        let b: Vec<char> = b.chars().collect();
+        let m = a.len();
+        let n = b.len();
+        if m.abs_diff(n) > max_dist { return max_dist + 1; }
         if m == 0 { return n; }
         if n == 0 { return m; }
-        let mut dp = vec![vec![0usize; n + 1]; m + 1];
-        for i in 0..=m { dp[i][0] = i; }
-        for j in 0..=n { dp[0][j] = j; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0; n + 1];
         for i in 1..=m {
+            curr[0] = i;
+            let mut row_min = curr[0];
             for j in 1..=n {
-                let cost = if a_chars[i-1] == b_chars[j-1] { 0 } else { 1 };
-                dp[i][j] = (dp[i-1][j] + 1).min(dp[i][j-1] + 1).min(dp[i-1][j-1] + cost);
+                let cost = if a[i-1] == b[j-1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j-1] + 1).min(prev[j-1] + cost);
+                row_min = row_min.min(curr[j]);
             }
+            if row_min > max_dist { return max_dist + 1; }
+            std::mem::swap(&mut prev, &mut curr);
         }
-        dp[m][n]
+        prev[n]
     }
 }

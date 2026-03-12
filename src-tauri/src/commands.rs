@@ -71,6 +71,7 @@ pub fn create_project(db: State<Database>, req: CreateProjectRequest) -> CmdResu
         print_width_mm: None,
         print_height_mm: None,
         print_time_mins: None,
+        is_template: false,
     })
 }
 
@@ -80,7 +81,7 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
     let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, thumbnail_path, created_at, updated_at, print_width_mm, print_height_mm, print_time_mins FROM projects WHERE id = ?1"
+        "SELECT id, name, description, thumbnail_path, created_at, updated_at, print_width_mm, print_height_mm, print_time_mins, is_template FROM projects WHERE id = ?1"
     ).map_err(map_err)?;
 
     let project = stmt.query_row(rusqlite::params![id], |row| {
@@ -96,6 +97,7 @@ pub fn get_project(db: State<Database>, id: String) -> CmdResult<Project> {
             print_width_mm: row.get(6)?,
             print_height_mm: row.get(7)?,
             print_time_mins: row.get(8)?,
+            is_template: row.get::<_, i32>(9).unwrap_or(0) != 0,
         })
     }).map_err(map_err)?;
 
@@ -111,26 +113,46 @@ pub fn update_project(db: State<Database>, id: String, req: UpdateProjectRequest
     let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let now = Utc::now().to_rfc3339();
 
+    let mut sets = vec!["updated_at = ?1".to_string()];
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
+    let mut idx = 2;
+
     if let Some(name) = &req.name {
-        conn.execute("UPDATE projects SET name = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![name, now, id]).map_err(map_err)?;
+        sets.push(format!("name = ?{}", idx));
+        params.push(Box::new(name.clone()));
+        idx += 1;
     }
     if let Some(description) = &req.description {
-        conn.execute("UPDATE projects SET description = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![description, now, id]).map_err(map_err)?;
+        sets.push(format!("description = ?{}", idx));
+        params.push(Box::new(description.clone()));
+        idx += 1;
     }
     if let Some(w) = &req.print_width_mm {
-        conn.execute("UPDATE projects SET print_width_mm = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![w, now, id]).map_err(map_err)?;
+        sets.push(format!("print_width_mm = ?{}", idx));
+        params.push(Box::new(*w));
+        idx += 1;
     }
     if let Some(h) = &req.print_height_mm {
-        conn.execute("UPDATE projects SET print_height_mm = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![h, now, id]).map_err(map_err)?;
+        sets.push(format!("print_height_mm = ?{}", idx));
+        params.push(Box::new(*h));
+        idx += 1;
     }
     if let Some(t) = &req.print_time_mins {
-        conn.execute("UPDATE projects SET print_time_mins = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![t, now, id]).map_err(map_err)?;
+        sets.push(format!("print_time_mins = ?{}", idx));
+        params.push(Box::new(*t));
+        idx += 1;
     }
+
+    let sql = format!(
+        "UPDATE projects SET {} WHERE id = ?{}",
+        sets.join(", "),
+        idx
+    );
+    params.push(Box::new(id));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(map_err)?;
+
     Ok(())
 }
 
@@ -153,6 +175,169 @@ pub fn delete_project(db: State<Database>, id: String) -> CmdResult<()> {
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn set_project_template(db: State<Database>, id: String, is_template: bool) -> CmdResult<()> {
+    let conn = db.conn();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE projects SET is_template = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![is_template, now, id],
+    ).map_err(map_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_from_template(db: State<Database>, template_id: String, name: String, description: Option<String>) -> CmdResult<Project> {
+    let conn = db.conn();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
+    let new_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let desc = description.unwrap_or_default();
+
+    // Get source template print info
+    let (pw, ph, pt): (Option<f64>, Option<f64>, Option<i64>) = conn.query_row(
+        "SELECT print_width_mm, print_height_mm, print_time_mins FROM projects WHERE id = ?1",
+        rusqlite::params![template_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(map_err)?;
+
+    // Create new project (NOT a template)
+    conn.execute(
+        "INSERT INTO projects (id, name, description, print_width_mm, print_height_mm, print_time_mins, is_template, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+        rusqlite::params![new_id, name, desc, pw, ph, pt, now, now],
+    ).map_err(map_err)?;
+
+    // Create project directories
+    let new_project_dir = Database::data_dir().join("projects").join(&new_id);
+    let new_files_dir = new_project_dir.join("files");
+    let new_thumb_dir = new_project_dir.join("thumbnails");
+    fs::create_dir_all(&new_files_dir).map_err(map_err)?;
+    fs::create_dir_all(&new_thumb_dir).map_err(map_err)?;
+
+    // Copy files
+    let mut stmt = conn.prepare(
+        "SELECT id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at FROM files WHERE project_id = ?1"
+    ).map_err(map_err)?;
+    let files: Vec<(String, String, String, i64, String, Option<String>, bool, String, String, String)> = stmt.query_map(
+        rusqlite::params![template_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
+    ).map_err(map_err)?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    // Map old file IDs to new file IDs for filament copying
+    let mut file_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for (old_file_id, file_path, filename, file_size, notes, thumb_path, favorited, metadata, created_at, modified_at) in &files {
+        let new_file_id = Uuid::new_v4().to_string();
+        file_id_map.insert(old_file_id.clone(), new_file_id.clone());
+        let src = Path::new(file_path);
+        let dest = new_files_dir.join(filename);
+
+        if src.exists() {
+            if let Err(e) = fs::copy(src, &dest) {
+                eprintln!("Warning: failed to copy file {:?}: {}", src, e);
+            }
+        }
+
+        let new_thumb = if let Some(tp) = thumb_path {
+            let src_thumb = Path::new(tp);
+            if src_thumb.exists() {
+                let thumb_name = format!("file_{}.png", new_file_id);
+                let dest_thumb = new_thumb_dir.join(&thumb_name);
+                if let Err(e) = fs::copy(src_thumb, &dest_thumb) {
+                    eprintln!("Warning: failed to copy thumbnail {:?}: {}", src_thumb, e);
+                }
+                Some(dest_thumb.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        conn.execute(
+            "INSERT INTO files (id, project_id, file_path, original_filename, file_size, notes, thumbnail_path, favorited, metadata, created_at, modified_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![new_file_id, new_id, dest.to_string_lossy().to_string(), filename, file_size, notes, new_thumb, favorited, metadata, created_at, modified_at],
+        ).map_err(map_err)?;
+    }
+
+    // Copy project thumbnail
+    let src_cover = Database::data_dir().join("projects").join(&template_id).join("thumbnails").join("cover.png");
+    let src_cover_svg = Database::data_dir().join("projects").join(&template_id).join("thumbnails").join("cover.svg");
+    let new_thumb_path = if src_cover.exists() {
+        let dest = new_thumb_dir.join("cover.png");
+        fs::copy(&src_cover, &dest).ok();
+        Some(dest.to_string_lossy().to_string())
+    } else if src_cover_svg.exists() {
+        let dest = new_thumb_dir.join("cover.svg");
+        fs::copy(&src_cover_svg, &dest).ok();
+        Some(dest.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    if let Some(ref tp) = new_thumb_path {
+        conn.execute(
+            "UPDATE projects SET thumbnail_path = ?1 WHERE id = ?2",
+            rusqlite::params![tp, new_id],
+        ).map_err(map_err)?;
+    }
+
+    // Copy tags
+    conn.execute(
+        "INSERT INTO project_tags (project_id, tag_id) SELECT ?1, tag_id FROM project_tags WHERE project_id = ?2",
+        rusqlite::params![new_id, template_id],
+    ).map_err(map_err)?;
+
+    // Copy collections
+    conn.execute(
+        "INSERT INTO project_collections (project_id, collection_id) SELECT ?1, collection_id FROM project_collections WHERE project_id = ?2",
+        rusqlite::params![new_id, template_id],
+    ).map_err(map_err)?;
+
+    // Copy project filaments (map old file IDs to new ones)
+    let mut pf_stmt = conn.prepare(
+        "SELECT id, file_id, curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual FROM project_filaments WHERE project_id = ?1"
+    ).map_err(map_err)?;
+    let pf_rows: Vec<(String, Option<String>, Option<String>, String, String, String, Option<f64>, String, bool)> = pf_stmt.query_map(
+        rusqlite::params![template_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?)),
+    ).map_err(map_err)?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    for (_old_pf_id, old_file_id, curated_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual) in &pf_rows {
+        let new_pf_id = Uuid::new_v4().to_string();
+        let new_file_id = old_file_id.as_ref().and_then(|old| file_id_map.get(old).cloned());
+        conn.execute(
+            "INSERT INTO project_filaments (id, project_id, file_id, curated_filament_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![new_pf_id, new_id, new_file_id, curated_id, parsed_color, parsed_brand, parsed_name, parsed_td, match_status, is_manual],
+        ).map_err(map_err)?;
+    }
+
+    let tags = get_project_tags(&conn, &new_id).map_err(map_err)?;
+    let collections = get_project_collections(&conn, &new_id).map_err(map_err)?;
+
+    Ok(Project {
+        id: new_id,
+        name,
+        description: desc,
+        thumbnail_path: new_thumb_path,
+        created_at: now.clone(),
+        updated_at: now,
+        tags,
+        collections,
+        print_width_mm: pw,
+        print_height_mm: ph,
+        print_time_mins: pt,
+        is_template: false,
+    })
 }
 
 #[tauri::command]
@@ -284,6 +469,7 @@ pub fn duplicate_project(db: State<Database>, id: String) -> CmdResult<Project> 
         print_width_mm: pw,
         print_height_mm: ph,
         print_time_mins: pt,
+        is_template: false,
     })
 }
 
@@ -296,6 +482,13 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
     let mut param_idx = 1;
 
+    // Template filter: by default exclude templates, when true show only templates
+    if req.is_template.unwrap_or(false) {
+        conditions.push("p.is_template = 1".to_string());
+    } else {
+        conditions.push("p.is_template = 0".to_string());
+    }
+
     // Full-text search
     if let Some(search) = &req.search {
         if !search.is_empty() {
@@ -303,10 +496,24 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
                 "p.rowid IN (SELECT rowid FROM projects_fts WHERE projects_fts MATCH ?{})",
                 param_idx
             ));
-            // FTS5 prefix search
-            let search_term = format!("{}*", search.replace('"', ""));
-            params.push(Box::new(search_term));
-            param_idx += 1;
+            // Sanitize FTS5 special characters to prevent operator injection
+            let sanitized: String = search.chars()
+                .filter(|c| !matches!(c, '"' | '(' | ')' | '{' | '}' | '^' | ':' | '*'))
+                .collect();
+            // Strip FTS5 boolean operators (AND, OR, NOT, NEAR) as standalone words
+            let search_term = sanitized
+                .split_whitespace()
+                .filter(|word| !matches!(*word, "AND" | "OR" | "NOT" | "NEAR"))
+                .collect::<Vec<&str>>()
+                .join(" ");
+            if search_term.is_empty() {
+                // If sanitization removed everything, skip FTS filter
+                conditions.pop();
+            } else {
+                let search_term = format!("{}*", search_term);
+                params.push(Box::new(search_term));
+                param_idx += 1;
+            }
         }
     }
 
@@ -442,7 +649,8 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
 
     let sql = format!(
         "SELECT p.id, p.name, p.thumbnail_path, p.created_at, p.updated_at,
-                (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) as file_count
+                (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) as file_count,
+                p.is_template
          FROM projects p WHERE {} ORDER BY {} {}",
         conditions.join(" AND "), sort_col, sort_dir
     );
@@ -462,6 +670,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
             filaments: vec![],
             size: None,
             starred_3mf_path: None,
+            is_template: row.get::<_, i32>(6).unwrap_or(0) != 0,
         })
     }).map_err(map_err)?;
 
@@ -474,12 +683,20 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         return Ok(projects);
     }
 
-    // Batch-fetch tags for all projects in one query
+    // Build a comma-separated list of filtered project IDs for scoping supplemental queries
+    let id_list: String = projects.iter()
+        .map(|p| format!("'{}'", p.id.replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Batch-fetch tags for filtered projects only
     {
-        let mut tag_stmt = conn.prepare(
+        let tag_sql = format!(
             "SELECT pt.project_id, t.id, t.name, t.color FROM tags t
-             INNER JOIN project_tags pt ON t.id = pt.tag_id ORDER BY t.name"
-        ).map_err(map_err)?;
+             INNER JOIN project_tags pt ON t.id = pt.tag_id
+             WHERE pt.project_id IN ({}) ORDER BY t.name", id_list
+        );
+        let mut tag_stmt = conn.prepare(&tag_sql).map_err(map_err)?;
         let tag_rows = tag_stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, Tag { id: row.get(1)?, name: row.get(2)?, color: row.get(3)? }))
         }).map_err(map_err)?;
@@ -496,15 +713,17 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Batch-fetch filaments for all projects in one query
+    // Batch-fetch filaments for filtered projects only
     {
-        let mut pf_stmt = conn.prepare(
+        let pf_sql = format!(
             "SELECT pf.project_id, pf.id, pf.curated_filament_id, pf.parsed_color, pf.parsed_brand, pf.parsed_name, pf.parsed_td, pf.match_status,
                     cf.brand, cf.line, cf.material, cf.name, cf.color, cf.transmission_distance, cf.owned, pf.is_manual
              FROM project_filaments pf
              LEFT JOIN shared.curated_filaments cf ON pf.curated_filament_id = cf.id
-             ORDER BY COALESCE(cf.brand, pf.parsed_brand), COALESCE(cf.name, pf.parsed_name)"
-        ).map_err(map_err)?;
+             WHERE pf.project_id IN ({})
+             ORDER BY COALESCE(cf.brand, pf.parsed_brand), COALESCE(cf.name, pf.parsed_name)", id_list
+        );
+        let mut pf_stmt = conn.prepare(&pf_sql).map_err(map_err)?;
         let pf_rows = pf_stmt.query_map([], |row| {
             let project_id: String = row.get(0)?;
             let curated_id: Option<String> = row.get(2)?;
@@ -553,17 +772,19 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Batch-fetch sizes for all projects in one query
+    // Batch-fetch sizes for filtered projects only
     {
-        let mut size_stmt = conn.prepare(
+        let size_sql = format!(
             "SELECT project_id,
                     CAST(ROUND(json_extract(metadata, '$.width_mm')) AS INTEGER) || 'x' ||
                     CAST(ROUND(json_extract(metadata, '$.height_mm')) AS INTEGER) || 'mm'
              FROM files
-             WHERE favorited = 1
+             WHERE project_id IN ({})
+               AND favorited = 1
                AND json_extract(metadata, '$.width_mm') IS NOT NULL
-               AND json_extract(metadata, '$.height_mm') IS NOT NULL"
-        ).map_err(map_err)?;
+               AND json_extract(metadata, '$.height_mm') IS NOT NULL", id_list
+        );
+        let mut size_stmt = conn.prepare(&size_sql).map_err(map_err)?;
         let size_rows = size_stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }).map_err(map_err)?;
@@ -578,12 +799,14 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         }
     }
 
-    // Batch-fetch starred 3MF file paths
+    // Batch-fetch starred 3MF file paths for filtered projects only
     {
-        let mut stmt_3mf = conn.prepare(
+        let threemf_sql = format!(
             "SELECT project_id, file_path FROM files
-             WHERE favorited = 1 AND LOWER(original_filename) LIKE '%.3mf'"
-        ).map_err(map_err)?;
+             WHERE project_id IN ({})
+               AND favorited = 1 AND LOWER(original_filename) LIKE '%.3mf'", id_list
+        );
+        let mut stmt_3mf = conn.prepare(&threemf_sql).map_err(map_err)?;
         let rows_3mf = stmt_3mf.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }).map_err(map_err)?;
@@ -665,6 +888,7 @@ pub fn delete_tag(db: State<Database>, id: String) -> CmdResult<()> {
 pub fn set_project_tags(db: State<Database>, project_id: String, tag_ids: Vec<String>) -> CmdResult<()> {
     let conn = db.conn();
     let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
+    conn.execute_batch("BEGIN").map_err(map_err)?;
     conn.execute("DELETE FROM project_tags WHERE project_id = ?1", rusqlite::params![project_id]).map_err(map_err)?;
     for tag_id in &tag_ids {
         conn.execute(
@@ -674,6 +898,7 @@ pub fn set_project_tags(db: State<Database>, project_id: String, tag_ids: Vec<St
     }
     let now = Utc::now().to_rfc3339();
     conn.execute("UPDATE projects SET updated_at = ?1 WHERE id = ?2", rusqlite::params![now, project_id]).map_err(map_err)?;
+    conn.execute_batch("COMMIT").map_err(map_err)?;
     Ok(())
 }
 
@@ -978,10 +1203,10 @@ pub fn update_file_notes(db: State<Database>, file_id: String, notes: String) ->
 pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<bool> {
     let conn = db.conn();
     let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
-    let (current, file_path, filename): (i32, String, String) = conn.query_row(
-        "SELECT favorited, file_path, original_filename FROM files WHERE id = ?1",
+    let (current, file_path, filename, project_id): (i32, String, String, String) = conn.query_row(
+        "SELECT favorited, file_path, original_filename, project_id FROM files WHERE id = ?1",
         rusqlite::params![file_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     ).map_err(map_err)?;
     let new_val = if current != 0 { 0 } else { 1 };
 
@@ -992,13 +1217,6 @@ pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<b
         conn.execute(
             "UPDATE files SET favorited = 1, metadata = ?1 WHERE id = ?2",
             rusqlite::params![metadata_json, file_id],
-        ).map_err(map_err)?;
-
-        // Get project_id for this file
-        let project_id: String = conn.query_row(
-            "SELECT project_id FROM files WHERE id = ?1",
-            rusqlite::params![file_id],
-            |row| row.get(0),
         ).map_err(map_err)?;
 
         let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -1035,6 +1253,8 @@ pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<b
                 }
 
                 if should_add {
+                    // Load curated filaments once for in-memory matching
+                    let curated = Database::load_curated_filaments(conn).map_err(map_err)?;
                     for f in filaments {
                         let pf_id = Uuid::new_v4().to_string();
                         conn.execute(
@@ -1043,7 +1263,7 @@ pub fn toggle_file_favorite(db: State<Database>, file_id: String) -> CmdResult<b
                             rusqlite::params![pf_id, project_id, file_id, f.color, f.brand, f.name],
                         ).map_err(map_err)?;
 
-                        if let Some((curated_id, status)) = Database::find_match(conn, &f.color, &f.brand, &f.name).map_err(map_err)? {
+                        if let Some((curated_id, status)) = Database::find_match_in_memory(&curated, &f.color, &f.brand, &f.name) {
                             conn.execute(
                                 "UPDATE project_filaments SET curated_filament_id = ?1, match_status = ?2 WHERE id = ?3",
                                 rusqlite::params![curated_id, status, pf_id],
@@ -1552,6 +1772,22 @@ pub fn list_folder_files(path: String) -> CmdResult<Vec<String>> {
 
 #[tauri::command]
 pub fn open_file_in_default_app(path: String) -> CmdResult<()> {
+    // Validate path exists as a file and is within the library directory
+    let file_path = Path::new(&path);
+    if !file_path.is_file() {
+        return Err("File does not exist".to_string());
+    }
+
+    let library_dir = config::library_path();
+    let canonical_library = fs::canonicalize(&library_dir)
+        .map_err(|_| "Library directory not found".to_string())?;
+    let canonical_file = fs::canonicalize(file_path)
+        .map_err(|_| "File not found".to_string())?;
+
+    if !canonical_file.starts_with(&canonical_library) {
+        return Err("Access denied: file is outside the library directory".to_string());
+    }
+
     open::that(&path).map_err(map_err)
 }
 
@@ -1585,9 +1821,9 @@ pub fn open_file_with_app(path: String, app: String) -> CmdResult<()> {
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, try to launch the app executable directly with the file as argument
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &app, &path])
+        // On Windows, launch the app directly without shell interpretation to avoid injection
+        std::process::Command::new(&app)
+            .arg(&path)
             .spawn()
             .map_err(map_err)?;
     }
@@ -1608,12 +1844,38 @@ pub fn open_file_with_app(path: String, app: String) -> CmdResult<()> {
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> CmdResult<()> {
     let p = Path::new(&path);
+
+    // Validate path is within the library directory
+    let library_dir = config::library_path();
+    let canonical_library = fs::canonicalize(&library_dir)
+        .map_err(|_| "Library directory not found".to_string())?;
+    let canonical_path = fs::canonicalize(p)
+        .map_err(|_| "Path not found".to_string())?;
+
+    if !canonical_path.starts_with(&canonical_library) {
+        return Err("Access denied: path is outside the library directory".to_string());
+    }
+
     let folder = if p.is_file() { p.parent().unwrap_or(p) } else { p };
     open::that(folder).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn read_text_file(path: String) -> CmdResult<String> {
+    // Validate the file is within the library's projects directory
+    let library_dir = config::library_path();
+    let projects_dir = library_dir.join("projects");
+    let file_path = Path::new(&path);
+
+    let canonical_projects = fs::canonicalize(&projects_dir)
+        .map_err(|_| "Library projects directory not found".to_string())?;
+    let canonical_file = fs::canonicalize(file_path)
+        .map_err(|_| "File not found".to_string())?;
+
+    if !canonical_file.starts_with(&canonical_projects) {
+        return Err("Access denied: file is outside the library projects directory".to_string());
+    }
+
     fs::read_to_string(&path).map_err(map_err)
 }
 
@@ -1693,25 +1955,30 @@ pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<
         }
     }
 
-    // 3. Re-parse metadata for favorited hfp/txt files (in case parsing logic changed)
+    // 3. Re-parse metadata for favorited hfp/txt files only if modified on disk
     {
         let mut stmt = conn.prepare(
-            "SELECT id, file_path, original_filename FROM files WHERE project_id = ?1 AND favorited = 1"
+            "SELECT id, file_path, original_filename, modified_at FROM files WHERE project_id = ?1 AND favorited = 1"
         ).map_err(map_err)?;
-        let favorited: Vec<(String, String, String)> = stmt.query_map(rusqlite::params![project_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        let favorited: Vec<(String, String, String, String)> = stmt.query_map(rusqlite::params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
         }).map_err(map_err)?
         .filter_map(|r| r.ok())
         .collect();
 
-        for (file_id, file_path, filename) in &favorited {
+        for (file_id, file_path, filename, stored_modified) in &favorited {
             let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
             if ext == "hfp" || ext == "txt" {
+                // Skip re-parsing if file hasn't changed on disk
+                let disk_modified = file_modified_time(Path::new(file_path));
+                if disk_modified == *stored_modified && !stored_modified.is_empty() {
+                    continue;
+                }
                 let metadata = parse_file_metadata(file_path, filename);
                 let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
                 conn.execute(
-                    "UPDATE files SET metadata = ?1 WHERE id = ?2",
-                    rusqlite::params![metadata_json, file_id],
+                    "UPDATE files SET metadata = ?1, modified_at = ?2 WHERE id = ?3",
+                    rusqlite::params![metadata_json, disk_modified, file_id],
                 ).map_err(map_err)?;
             }
         }
@@ -1720,12 +1987,7 @@ pub fn sync_project_files(db: State<Database>, project_id: String) -> CmdResult<
     Ok(SyncResult { added, removed })
 }
 
-// ── Filament & Size Filters ──
-
-#[tauri::command]
-pub fn list_all_filaments(db: State<Database>) -> CmdResult<Vec<CuratedFilament>> {
-    list_curated_filaments(db)
-}
+// ── Size Filters ──
 
 #[tauri::command]
 pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
@@ -1841,34 +2103,56 @@ pub fn update_curated_filament(db: State<Database>, id: String, req: UpdateCurat
     let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
     let now = Utc::now().to_rfc3339();
 
+    let mut sets = vec!["updated_at = ?1".to_string()];
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
+    let mut idx = 2;
+
     if let Some(brand) = &req.brand {
-        conn.execute("UPDATE shared.curated_filaments SET brand = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![brand, now, id]).map_err(map_err)?;
+        sets.push(format!("brand = ?{}", idx));
+        params.push(Box::new(brand.clone()));
+        idx += 1;
     }
     if let Some(line) = &req.line {
-        conn.execute("UPDATE shared.curated_filaments SET line = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![line, now, id]).map_err(map_err)?;
+        sets.push(format!("line = ?{}", idx));
+        params.push(Box::new(line.clone()));
+        idx += 1;
     }
     if let Some(material) = &req.material {
-        conn.execute("UPDATE shared.curated_filaments SET material = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![material, now, id]).map_err(map_err)?;
+        sets.push(format!("material = ?{}", idx));
+        params.push(Box::new(material.clone()));
+        idx += 1;
     }
     if let Some(name) = &req.name {
-        conn.execute("UPDATE shared.curated_filaments SET name = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![name, now, id]).map_err(map_err)?;
+        sets.push(format!("name = ?{}", idx));
+        params.push(Box::new(name.clone()));
+        idx += 1;
     }
     if let Some(color) = &req.color {
-        conn.execute("UPDATE shared.curated_filaments SET color = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![color, now, id]).map_err(map_err)?;
+        sets.push(format!("color = ?{}", idx));
+        params.push(Box::new(color.clone()));
+        idx += 1;
     }
     if let Some(td) = req.transmission_distance {
-        conn.execute("UPDATE shared.curated_filaments SET transmission_distance = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![td, now, id]).map_err(map_err)?;
+        sets.push(format!("transmission_distance = ?{}", idx));
+        params.push(Box::new(td));
+        idx += 1;
     }
     if let Some(owned) = req.owned {
-        conn.execute("UPDATE shared.curated_filaments SET owned = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![if owned { 1 } else { 0 }, now, id]).map_err(map_err)?;
+        sets.push(format!("owned = ?{}", idx));
+        params.push(Box::new(if owned { 1i32 } else { 0i32 }));
+        idx += 1;
     }
+
+    let sql = format!(
+        "UPDATE shared.curated_filaments SET {} WHERE id = ?{}",
+        sets.join(", "),
+        idx
+    );
+    params.push(Box::new(id));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(map_err)?;
+
     Ok(())
 }
 
@@ -1894,6 +2178,7 @@ pub fn import_curated_filaments(db: State<Database>, file_path: String) -> CmdRe
     let now = Utc::now().to_rfc3339();
     let mut count = 0;
 
+    conn.execute_batch("BEGIN").map_err(map_err)?;
     for item in arr {
         // Skip IMAGE type entries (check both "Type" and "Material")
         let material = item.get("Type").and_then(|v| v.as_str())
@@ -1933,6 +2218,7 @@ pub fn import_curated_filaments(db: State<Database>, file_path: String) -> CmdRe
             );
         }
     }
+    conn.execute_batch("COMMIT").map_err(map_err)?;
 
     Ok(count)
 }
@@ -2050,6 +2336,7 @@ pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
         filaments: Vec<FilamentInfo>,
     }
     let mut parsed: Vec<ParsedFile> = Vec::new();
+    conn.execute_batch("BEGIN").map_err(map_err)?;
     for (file_id, project_id, file_path, filename) in &files {
         let metadata = parse_file_metadata(file_path, filename);
         let metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_string());
@@ -2062,6 +2349,7 @@ pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
         let filaments = metadata.filaments.unwrap_or_default();
         parsed.push(ParsedFile { file_id: file_id.clone(), project_id: project_id.clone(), ext, filaments });
     }
+    conn.execute_batch("COMMIT").map_err(map_err)?;
 
     // Determine which projects have hfp/txt filament sources
     let mut projects_with_hfp_txt = std::collections::HashSet::new();
@@ -2073,6 +2361,7 @@ pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
 
     // Second pass: insert filaments, skipping 3mf when hfp/txt exists
     let mut added: u32 = 0;
+    conn.execute_batch("BEGIN").map_err(map_err)?;
     for pf in &parsed {
         if pf.filaments.is_empty() { continue; }
         if pf.ext == "3mf" && projects_with_hfp_txt.contains(&pf.project_id) {
@@ -2088,6 +2377,7 @@ pub fn reparse_all_project_filaments(db: State<Database>) -> CmdResult<u32> {
             added += 1;
         }
     }
+    conn.execute_batch("COMMIT").map_err(map_err)?;
 
     // Run matching on all unmatched
     Database::run_matching_all(conn).map_err(map_err)?;
@@ -2544,8 +2834,17 @@ pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Proje
             let archive_path = format!("files/{}", filename);
             let file_dest = files_dir.join(filename);
 
-            // Verify the resolved path is within the target directory
+            // Validate destination path BEFORE writing to prevent TOCTOU
             let canonical_files_dir = fs::canonicalize(&files_dir).map_err(map_err)?;
+            let dest_parent = file_dest.parent()
+                .ok_or_else(|| format!("Invalid destination path for file: {}", filename))?;
+            let canonical_parent = fs::canonicalize(dest_parent)
+                .map_err(|_| format!("Destination parent directory does not exist for file: {}", filename))?;
+            if !canonical_parent.starts_with(&canonical_files_dir) {
+                eprintln!("Path traversal detected before write, skipping: {:?}", file_dest);
+                continue;
+            }
+
             if let Ok(mut entry) = archive.by_name(&archive_path) {
                 // Check entry size before extracting
                 if entry.size() > MAX_FILE_SIZE {
@@ -2554,15 +2853,6 @@ pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Proje
                 }
                 let mut out = fs::File::create(&file_dest).map_err(map_err)?;
                 std::io::copy(&mut entry, &mut out).map_err(map_err)?;
-
-                // Verify file was written inside the expected directory
-                if let Ok(canonical_dest) = fs::canonicalize(&file_dest) {
-                    if !canonical_dest.starts_with(&canonical_files_dir) {
-                        let _ = fs::remove_file(&file_dest);
-                        eprintln!("Path traversal detected, removed: {:?}", file_dest);
-                        continue;
-                    }
-                }
             } else {
                 continue; // skip files not found in archive
             }
@@ -2663,6 +2953,7 @@ pub fn import_project(db: State<Database>, file_path: String) -> CmdResult<Proje
         print_width_mm: pw,
         print_height_mm: ph,
         print_time_mins: pt,
+        is_template: false,
     })
 }
 
@@ -2787,6 +3078,17 @@ pub fn get_storage_sizes() -> CmdResult<StorageSizes> {
     let projects_size = dir_size(&base.join("projects"));
     let deleted_size = dir_size(&base.join("deleted"));
     Ok(StorageSizes { projects_size, deleted_size })
+}
+
+#[tauri::command]
+pub fn get_drag_icon() -> CmdResult<String> {
+    let icon_path = Database::data_dir().join(".drag_icon.png");
+    if !icon_path.exists() {
+        // Create a simple 32x32 semi-transparent gray PNG
+        let img = image::RgbaImage::from_fn(32, 32, |_, _| image::Rgba([160, 160, 160, 200]));
+        img.save(&icon_path).map_err(map_err)?;
+    }
+    Ok(icon_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
