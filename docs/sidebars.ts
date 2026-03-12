@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
         'features/tags-collections',
         'features/views',
         'features/libraries',
+        'features/templates',
         'features/keyboard-shortcuts',
       ],
     },
