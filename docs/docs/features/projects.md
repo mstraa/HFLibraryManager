@@ -10,6 +10,7 @@ Projects are the core organizational unit in HF Library Manager. Each project re
 
 - Click **New Project** or press `Cmd/Ctrl + N`
 - Optionally select a source folder to import files from
+- Or start from a [template](./templates) to pre-fill files, filaments, and print specs
 - Files are automatically categorized by type (Design, HueForge, 3MF, Exports, Other)
 - The newest file per category is auto-starred as a favorite
 - Design images are automatically set as the project thumbnail
