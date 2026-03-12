@@ -15,7 +15,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_drag::init());
 
     #[cfg(debug_assertions)]
     let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
@@ -29,6 +30,8 @@ pub fn run() {
             commands::update_project,
             commands::delete_project,
             commands::duplicate_project,
+            commands::set_project_template,
+            commands::create_from_template,
             commands::list_projects,
             commands::set_project_thumbnail,
             // Tags
@@ -37,8 +40,7 @@ pub fn run() {
             commands::update_tag,
             commands::delete_tag,
             commands::set_project_tags,
-            // Filament & Size filters
-            commands::list_all_filaments,
+            // Size filters
             commands::list_all_sizes,
             // Curated filaments
             commands::list_curated_filaments,
@@ -90,6 +92,7 @@ pub fn run() {
             commands::remove_library,
             commands::switch_library,
             commands::rename_library,
+            commands::get_drag_icon,
             commands::get_storage_sizes,
             commands::empty_trash,
             commands::reset_to_default,
