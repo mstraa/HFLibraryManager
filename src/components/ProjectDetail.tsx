@@ -30,13 +30,32 @@ import {
 } from "../lib/api";
 import type { Project, ProjectFile, TagWithCount, Collection, FileMetadata, ProjectFilamentDisplay, CuratedFilament } from "../lib/types";
 const MarkdownRenderer = React.lazy(() =>
-  import("react-markdown").then((mod) => {
-    return import("remark-gfm").then((gfm) => ({
-      default: (props: { children: string }) => (
-        <mod.default remarkPlugins={[gfm.default]}>{props.children}</mod.default>
-      ),
-    }));
-  })
+  Promise.all([
+    import("react-markdown"),
+    import("remark-gfm"),
+    import("@tauri-apps/plugin-opener"),
+  ]).then(([mod, gfm, opener]) => ({
+    default: (props: { children: string }) => (
+      <mod.default
+        remarkPlugins={[gfm.default]}
+        components={{
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              onClick={(e) => {
+                e.preventDefault();
+                if (href) opener.openUrl(href);
+              }}
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {props.children}
+      </mod.default>
+    ),
+  }))
 );
 import FileList from "./FileList";
 import ConfirmDialog from "./ConfirmDialog";
