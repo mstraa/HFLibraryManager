@@ -154,6 +154,10 @@ export async function listAllSizes(): Promise<string[]> {
   return invoke("list_all_sizes");
 }
 
+export async function getPrintTimeRange(): Promise<[number, number]> {
+  return invoke("get_print_time_range");
+}
+
 // ── Collections ──
 
 export async function createCollection(name: string, description?: string): Promise<Collection> {

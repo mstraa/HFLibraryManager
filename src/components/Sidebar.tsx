@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listTags, listCollections, listUsedCuratedFilaments, listAllSizes } from "../lib/api";
+import { listTags, listCollections, listUsedCuratedFilaments, listAllSizes, getPrintTimeRange } from "../lib/api";
 import type { TagWithCount, Collection, CuratedFilamentWithCount } from "../lib/types";
 import TagManager from "./TagManager";
 import CollectionManager from "./CollectionManager";
+import DualRangeSlider from "./DualRangeSlider";
 import { onDragMouseDown } from "../hooks/useDrag";
 
 const STORAGE_KEY = "sidebar-collapsed";
 
-type SectionKey = "collections" | "tags" | "filaments" | "sizes";
+type SectionKey = "collections" | "tags" | "filaments" | "sizes" | "printTime";
 
 function loadCollapsed(): Record<SectionKey, boolean> {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) return JSON.parse(stored);
   } catch { /* ignore */ }
-  return { collections: false, tags: false, filaments: false, sizes: false };
+  return { collections: false, tags: false, filaments: false, sizes: false, printTime: false };
 }
 
 function saveCollapsed(state: Record<SectionKey, boolean>) {
@@ -42,6 +43,8 @@ interface SidebarProps {
   onOwnedOnlyChange: (v: boolean) => void;
   allOwned: boolean;
   onAllOwnedChange: (v: boolean) => void;
+  printTimeRange: [number, number] | null;
+  onPrintTimeRangeChange: (range: [number, number] | null) => void;
   showTemplates: boolean;
   onShowTemplatesChange: (v: boolean) => void;
   refreshKey?: number;
@@ -70,6 +73,8 @@ export default function Sidebar({
   onOwnedOnlyChange,
   allOwned,
   onAllOwnedChange,
+  printTimeRange,
+  onPrintTimeRangeChange,
   showTemplates,
   onShowTemplatesChange,
   refreshKey,
@@ -80,6 +85,7 @@ export default function Sidebar({
   const [collections, setCollections] = useState<Collection[]>([]);
   const [filaments, setFilaments] = useState<CuratedFilamentWithCount[]>([]);
   const [sizes, setSizes] = useState<string[]>([]);
+  const [timeRange, setTimeRange] = useState<[number, number] | null>(null);
   const [showTagManager, setShowTagManager] = useState(false);
   const [showCollectionManager, setShowCollectionManager] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(loadCollapsed);
@@ -94,13 +100,14 @@ export default function Sidebar({
   }
 
   const loadFilters = useCallback(async () => {
-    const [t, c, fl, sz] = await Promise.all([
-      listTags(), listCollections(), listUsedCuratedFilaments(), listAllSizes(),
+    const [t, c, fl, sz, tr] = await Promise.all([
+      listTags(), listCollections(), listUsedCuratedFilaments(), listAllSizes(), getPrintTimeRange(),
     ]);
     setTags(t);
     setCollections(c);
     setFilaments(fl);
     setSizes(sz);
+    setTimeRange(tr[0] < tr[1] ? tr : null);
   }, []);
 
   useEffect(() => {
@@ -206,6 +213,7 @@ export default function Sidebar({
     onAllOwnedChange(false);
     onSizeChange(undefined);
     onExcludedSizesChange([]);
+    onPrintTimeRangeChange(null);
     onShowTemplatesChange(false);
   }
 
@@ -228,6 +236,7 @@ export default function Sidebar({
     excludedSizes.length > 0 ||
     ownedOnly ||
     allOwned ||
+    printTimeRange !== null ||
     showTemplates;
 
   return (
@@ -523,6 +532,45 @@ export default function Sidebar({
                   );
                 })}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Print Time */}
+        {timeRange && (
+          <div>
+            <button onClick={() => toggleSection("printTime")} className="flex items-center gap-1 cursor-pointer group mb-2">
+              <svg
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 transition-transform ${collapsed.printTime ? "" : "rotate-90"}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider group-hover:text-gray-700 dark:group-hover:text-gray-300 transition-colors">
+                Print Time
+              </h3>
+            </button>
+            {!collapsed.printTime && (
+              <DualRangeSlider
+                min={timeRange[0]}
+                max={timeRange[1]}
+                valueLow={printTimeRange?.[0] ?? timeRange[0]}
+                valueHigh={printTimeRange?.[1] ?? timeRange[1]}
+                onChange={(low, high) => {
+                  if (low <= timeRange[0] && high >= timeRange[1]) {
+                    onPrintTimeRangeChange(null);
+                  } else {
+                    onPrintTimeRangeChange([low, high]);
+                  }
+                }}
+                formatLabel={(mins) => {
+                  if (mins < 60) return `${mins}m`;
+                  const h = Math.floor(mins / 60);
+                  const m = mins % 60;
+                  return m > 0 ? `${h}h${m}m` : `${h}h`;
+                }}
+                label="Print Time"
+              />
             )}
           </div>
         )}

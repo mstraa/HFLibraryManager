@@ -25,6 +25,7 @@ export interface ProjectSummary {
   size: string | null;
   starred_3mf_path: string | null;
   is_template: boolean;
+  print_time_mins: number | null;
 }
 
 export interface Tag {
@@ -137,4 +138,6 @@ export interface ListProjectsRequest {
   sort_by?: SortBy;
   sort_order?: SortOrder;
   is_template?: boolean;
+  print_time_min?: number;
+  print_time_max?: number;
 }

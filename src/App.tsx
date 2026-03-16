@@ -43,6 +43,7 @@ function App() {
   }, []);
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [allOwned, setAllOwned] = useState(false);
+  const [printTimeRange, setPrintTimeRange] = useState<[number, number] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -80,9 +81,11 @@ function App() {
       sort_by: sortBy,
       sort_order: sortOrder,
       is_template: showTemplates || undefined,
+      print_time_min: printTimeRange?.[0],
+      print_time_max: printTimeRange?.[1],
     });
     setProjects(result);
-  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, ownedOnly, allOwned, sortBy, sortOrder, showTemplates]);
+  }, [search, selectedTags, excludedTags, selectedCollection, selectedFilaments, excludedFilaments, selectedSize, excludedSizes, noFilamentFilter, ownedOnly, allOwned, sortBy, sortOrder, showTemplates, printTimeRange]);
 
   // Check first launch
   useEffect(() => {
@@ -360,6 +363,7 @@ function App() {
       setNoFilamentFilter(undefined);
       setSelectedSize(undefined);
       setExcludedSizes([]);
+      setPrintTimeRange(null);
       setActiveProjectId(null);
       navHistoryRef.current = [];
       navForwardRef.current = [];
@@ -384,6 +388,7 @@ function App() {
           setExcludedFilaments([]);
           setSelectedSize(undefined);
           setExcludedSizes([]);
+          setPrintTimeRange(null);
           _setNoFilamentFilter(undefined);
           setOwnedOnly(false);
           setAllOwned(false);
@@ -414,6 +419,8 @@ function App() {
         onOwnedOnlyChange={setOwnedOnly}
         allOwned={allOwned}
         onAllOwnedChange={setAllOwned}
+        printTimeRange={printTimeRange}
+        onPrintTimeRangeChange={setPrintTimeRange}
         showTemplates={showTemplates}
         onShowTemplatesChange={setShowTemplates}
         selectedSize={selectedSize}
@@ -434,6 +441,7 @@ function App() {
           setAllOwned(false);
           setSelectedSize(undefined);
           setExcludedSizes([]);
+          setPrintTimeRange(null);
           setShowTemplates(false);
         }}
       />

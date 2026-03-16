@@ -41,6 +41,7 @@ pub struct ProjectSummary {
     pub size: Option<String>,
     pub starred_3mf_path: Option<String>,
     pub is_template: bool,
+    pub print_time_mins: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -247,6 +248,8 @@ pub struct ListProjectsRequest {
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
     pub is_template: Option<bool>,
+    pub print_time_min: Option<i64>,
+    pub print_time_max: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

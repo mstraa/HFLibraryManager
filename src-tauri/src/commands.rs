@@ -635,6 +635,18 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
         );
     }
 
+    // Filter by print time range
+    if let Some(min) = req.print_time_min {
+        conditions.push(format!("p.print_time_mins >= ?{}", param_idx));
+        params.push(Box::new(min));
+        param_idx += 1;
+    }
+    if let Some(max) = req.print_time_max {
+        conditions.push(format!("p.print_time_mins <= ?{}", param_idx));
+        params.push(Box::new(max));
+        param_idx += 1;
+    }
+
     let _ = param_idx; // suppress unused warning
 
     let sort_col = match req.sort_by.as_deref() {
@@ -650,7 +662,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
     let sql = format!(
         "SELECT p.id, p.name, p.thumbnail_path, p.created_at, p.updated_at,
                 (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id) as file_count,
-                p.is_template
+                p.is_template, p.print_time_mins
          FROM projects p WHERE {} ORDER BY {} {}",
         conditions.join(" AND "), sort_col, sort_dir
     );
@@ -671,6 +683,7 @@ pub fn list_projects(db: State<Database>, req: ListProjectsRequest) -> CmdResult
             size: None,
             starred_3mf_path: None,
             is_template: row.get::<_, i32>(6).unwrap_or(0) != 0,
+            print_time_mins: row.get(7)?,
         })
     }).map_err(map_err)?;
 
@@ -2006,6 +2019,18 @@ pub fn list_all_sizes(db: State<Database>) -> CmdResult<Vec<String>> {
 
     let rows = stmt.query_map([], |row| row.get(0)).map_err(map_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn get_print_time_range(db: State<Database>) -> CmdResult<(i64, i64)> {
+    let conn = db.conn();
+    let conn = conn.as_ref().ok_or("Database not available — check your library path")?;
+    let (min, max): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(MIN(print_time_mins), 0), COALESCE(MAX(print_time_mins), 0) FROM projects WHERE print_time_mins IS NOT NULL AND is_template = 0",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(map_err)?;
+    Ok((min, max))
 }
 
 // ── Curated Filaments ──

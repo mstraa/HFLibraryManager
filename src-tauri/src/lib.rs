@@ -40,8 +40,9 @@ pub fn run() {
             commands::update_tag,
             commands::delete_tag,
             commands::set_project_tags,
-            // Size filters
+            // Size & time filters
             commands::list_all_sizes,
+            commands::get_print_time_range,
             // Curated filaments
             commands::list_curated_filaments,
             commands::list_used_curated_filaments,
