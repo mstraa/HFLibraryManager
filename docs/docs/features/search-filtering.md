@@ -32,6 +32,13 @@ Powered by SQLite FTS5, search across project names and descriptions. Type in th
 ### Size Filters
 - Filter projects by print dimensions category
 
+### Print Time Filter
+- A **dual-thumb range slider** in the sidebar lets you narrow projects by estimated print time
+- Drag the left or right thumb to set a minimum and maximum time
+- The current range is displayed as hours and minutes (e.g., `2h30m – 8h`)
+- Only appears when at least one project has print time data
+- Resetting the thumbs to the full range clears the filter
+
 ## Sorting
 
 Sort projects by:
